@@ -7,6 +7,7 @@
 #include <vulkan/vulkan_android.h>
 #include <vector>
 #include <cstring>
+#include "Model.h"
 
 #define LOG_TAG "VKRenderer"
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO, LOG_TAG, __VA_ARGS__)
@@ -29,6 +30,11 @@ struct VulkanState {
 	VkRenderPass renderPass = VK_NULL_HANDLE;
 	VkPipelineLayout pipelineLayout = VK_NULL_HANDLE;
 	VkPipeline graphicsPipeline = VK_NULL_HANDLE;
+	VkBuffer vertexBuffer = VK_NULL_HANDLE;
+	VkDeviceMemory vertexMemory = VK_NULL_HANDLE;
+	VkBuffer indexBuffer = VK_NULL_HANDLE;
+	VkDeviceMemory indexMemory = VK_NULL_HANDLE;
+	uint32_t indexCount = 0;
 	std::vector<VkFramebuffer> framebuffers;
 	VkCommandPool commandPool = VK_NULL_HANDLE;
 	std::vector<VkCommandBuffer> commandBuffers;
@@ -241,6 +247,57 @@ static void createRenderPass() {
 	check(vkCreateRenderPass(g.device, &rpci, nullptr, &g.renderPass), "vkCreateRenderPass");
 }
 
+static uint32_t findMemoryType(uint32_t typeFilter, VkMemoryPropertyFlags properties) {
+	VkPhysicalDeviceMemoryProperties memProps;
+	vkGetPhysicalDeviceMemoryProperties(g.physicalDevice, &memProps);
+	for (uint32_t i = 0; i < memProps.memoryTypeCount; i++) {
+		if ((typeFilter & (1 << i)) && (memProps.memoryTypes[i].propertyFlags & properties) == properties) {
+			return i;
+		}
+	}
+	LOGE("Failed to find suitable memory type");
+	abort();
+}
+
+static void createBuffer(VkDeviceSize size, VkBufferUsageFlags usage, VkMemoryPropertyFlags props, VkBuffer& buffer, VkDeviceMemory& memory) {
+	VkBufferCreateInfo bi{};
+	bi.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+	bi.size = size;
+	bi.usage = usage;
+	bi.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+	check(vkCreateBuffer(g.device, &bi, nullptr, &buffer), "vkCreateBuffer");
+
+	VkMemoryRequirements req{};
+	vkGetBufferMemoryRequirements(g.device, buffer, &req);
+
+	VkMemoryAllocateInfo ai{};
+	ai.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+	ai.allocationSize = req.size;
+	ai.memoryTypeIndex = findMemoryType(req.memoryTypeBits, props);
+	check(vkAllocateMemory(g.device, &ai, nullptr, &memory), "vkAllocateMemory");
+	check(vkBindBufferMemory(g.device, buffer, memory, 0), "vkBindBufferMemory");
+}
+
+static void uploadModelBuffers() {
+	Model cube = createCubeModel();
+	g.indexCount = static_cast<uint32_t>(cube.indices.size());
+
+	VkDeviceSize vsize = sizeof(float) * cube.positions.size();
+	VkDeviceSize isize = sizeof(uint16_t) * cube.indices.size();
+
+	createBuffer(vsize, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, g.vertexBuffer, g.vertexMemory);
+	createBuffer(isize, VK_BUFFER_USAGE_INDEX_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, g.indexBuffer, g.indexMemory);
+
+	void* data = nullptr;
+	check(vkMapMemory(g.device, g.vertexMemory, 0, vsize, 0, &data), "vkMapMemory(vertex)");
+	memcpy(data, cube.positions.data(), (size_t)vsize);
+	vkUnmapMemory(g.device, g.vertexMemory);
+
+	check(vkMapMemory(g.device, g.indexMemory, 0, isize, 0, &data), "vkMapMemory(index)");
+	memcpy(data, cube.indices.data(), (size_t)isize);
+	vkUnmapMemory(g.device, g.indexMemory);
+}
+
 static std::vector<uint32_t> loadSpirvFromAsset(const char* path) {
 	std::vector<uint32_t> words;
 	if (!g.assetManager) return words;
@@ -288,8 +345,21 @@ static void createPipeline() {
 	stages[1].module = frag;
 	stages[1].pName = "main";
 
+	VkVertexInputBindingDescription binding{};
+	binding.binding = 0;
+	binding.stride = sizeof(float) * 3;
+	binding.inputRate = VK_VERTEX_INPUT_RATE_VERTEX;
+	VkVertexInputAttributeDescription attr{};
+	attr.location = 0;
+	attr.binding = 0;
+	attr.format = VK_FORMAT_R32G32B32_SFLOAT;
+	attr.offset = 0;
 	VkPipelineVertexInputStateCreateInfo vertexInput{};
 	vertexInput.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
+	vertexInput.vertexBindingDescriptionCount = 1;
+	vertexInput.pVertexBindingDescriptions = &binding;
+	vertexInput.vertexAttributeDescriptionCount = 1;
+	vertexInput.pVertexAttributeDescriptions = &attr;
 
 	VkPipelineInputAssemblyStateCreateInfo inputAssembly{};
 	inputAssembly.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
@@ -306,8 +376,8 @@ static void createPipeline() {
 	raster.depthClampEnable = VK_FALSE;
 	raster.rasterizerDiscardEnable = VK_FALSE;
 	raster.polygonMode = VK_POLYGON_MODE_FILL;
-	raster.cullMode = VK_CULL_MODE_BACK_BIT;
-	raster.frontFace = VK_FRONT_FACE_CLOCKWISE;
+	raster.cullMode = VK_CULL_MODE_NONE;
+	raster.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
 	raster.depthBiasEnable = VK_FALSE;
 	raster.lineWidth = 1.0f;
 
@@ -417,7 +487,10 @@ static void recordCommandBuffers() {
 		vkCmdSetViewport(g.commandBuffers[i], 0, 1, &vp);
 		vkCmdSetScissor(g.commandBuffers[i], 0, 1, &sc);
 		vkCmdBindPipeline(g.commandBuffers[i], VK_PIPELINE_BIND_POINT_GRAPHICS, g.graphicsPipeline);
-		vkCmdDraw(g.commandBuffers[i], 3, 1, 0, 0);
+		VkDeviceSize offsets[] = {0};
+		vkCmdBindVertexBuffers(g.commandBuffers[i], 0, 1, &g.vertexBuffer, offsets);
+		vkCmdBindIndexBuffer(g.commandBuffers[i], g.indexBuffer, 0, VK_INDEX_TYPE_UINT16);
+		vkCmdDrawIndexed(g.commandBuffers[i], g.indexCount, 1, 0, 0, 0);
 		vkCmdEndRenderPass(g.commandBuffers[i]);
 		check(vkEndCommandBuffer(g.commandBuffers[i]), "vkEndCommandBuffer");
 	}
@@ -441,6 +514,10 @@ static void createSyncObjects() {
 }
 
 static void cleanupSwapchain() {
+	if (g.indexBuffer) { vkDestroyBuffer(g.device, g.indexBuffer, nullptr); g.indexBuffer = VK_NULL_HANDLE; }
+	if (g.indexMemory) { vkFreeMemory(g.device, g.indexMemory, nullptr); g.indexMemory = VK_NULL_HANDLE; }
+	if (g.vertexBuffer) { vkDestroyBuffer(g.device, g.vertexBuffer, nullptr); g.vertexBuffer = VK_NULL_HANDLE; }
+	if (g.vertexMemory) { vkFreeMemory(g.device, g.vertexMemory, nullptr); g.vertexMemory = VK_NULL_HANDLE; }
 	if (g.graphicsPipeline) { vkDestroyPipeline(g.device, g.graphicsPipeline, nullptr); g.graphicsPipeline = VK_NULL_HANDLE; }
 	if (g.pipelineLayout) { vkDestroyPipelineLayout(g.device, g.pipelineLayout, nullptr); g.pipelineLayout = VK_NULL_HANDLE; }
 	for (auto f : g.framebuffers) if (f) vkDestroyFramebuffer(g.device, f, nullptr);
@@ -458,6 +535,7 @@ static void recreateSwapchain(uint32_t width, uint32_t height) {
 	createImageViews();
 	createRenderPass();
 	createPipeline();
+	uploadModelBuffers();
 	createFramebuffers();
 	createCommandPoolBuffers();
 	recordCommandBuffers();
