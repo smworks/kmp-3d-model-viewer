@@ -45,6 +45,9 @@ add_custom_target(compile_shaders ALL DEPENDS ${SPV_OUTPUTS})
 add_library(vkrenderer SHARED
 	src/vkrenderer.cpp
 	src/vkrenderer.h
+	src/VulkanBuilder.cpp
+	src/VulkanBuilder.h
+	src/Model.h
 )
 
 find_library(log-lib log)
