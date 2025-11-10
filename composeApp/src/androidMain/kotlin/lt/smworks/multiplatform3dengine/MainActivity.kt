@@ -13,6 +13,10 @@ import lt.smworks.multiplatform3dengine.vulkan.VulkanScreen
 import lt.smworks.multiplatform3dengine.vulkan.VulkanNativeRenderer
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.remember
+import androidx.compose.material3.Text
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.ui.platform.LocalContext
+import lt.smworks.multiplatform3dengine.vulkan.VulkanSupport
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -28,22 +32,28 @@ class MainActivity : ComponentActivity() {
 @Composable
 fun AndroidSample() {
 	MaterialTheme {
+		val context = LocalContext.current
+		val supported = remember { VulkanSupport.isSupported(context) }
 		val renderer = remember { VulkanNativeRenderer() }
 		DisposableEffect(Unit) {
 			onDispose {
 				renderer.destroy()
 			}
 		}
-		VulkanScreen(
-			modifier = Modifier.fillMaxSize(),
-			onCreate = { surface ->
-				renderer.init(surface)
-				renderer.start()
-			},
-			onDestroy = {
-				renderer.destroy()
-			}
-		)
+		if (supported) {
+			VulkanScreen(
+				modifier = Modifier.fillMaxSize(),
+				onCreate = { surface ->
+					renderer.init(surface)
+					renderer.start()
+				},
+				onDestroy = {
+					renderer.destroy()
+				}
+			)
+		} else {
+			Text("Vulkan not supported on this device/emulator")
+		}
 	}
 }
 
