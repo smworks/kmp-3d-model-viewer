@@ -17,6 +17,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.platform.LocalContext
 import lt.smworks.multiplatform3dengine.vulkan.VulkanSupport
+import android.content.res.AssetManager
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -44,7 +45,7 @@ fun AndroidSample() {
 			VulkanScreen(
 				modifier = Modifier.fillMaxSize(),
 				onCreate = { surface ->
-					renderer.init(surface)
+					renderer.init(surface, context.assets)
 					renderer.start()
 				},
 				onDestroy = {

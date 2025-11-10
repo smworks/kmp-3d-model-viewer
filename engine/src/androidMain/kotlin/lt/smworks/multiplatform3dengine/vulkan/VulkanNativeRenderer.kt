@@ -1,6 +1,7 @@
 package lt.smworks.multiplatform3dengine.vulkan
 
 import android.view.Surface
+import android.content.res.AssetManager
 import java.util.concurrent.atomic.AtomicBoolean
 
 class VulkanNativeRenderer {
@@ -11,8 +12,8 @@ class VulkanNativeRenderer {
 		System.loadLibrary("vkrenderer")
 	}
 
-	fun init(surface: Surface) {
-		nativeInit(surface)
+	fun init(surface: Surface, assetManager: AssetManager) {
+		nativeInit(surface, assetManager)
 	}
 
 	fun start() {
@@ -39,7 +40,7 @@ class VulkanNativeRenderer {
 		nativeDestroy()
 	}
 
-	private external fun nativeInit(surface: Surface)
+	private external fun nativeInit(surface: Surface, assetManager: AssetManager)
 	private external fun nativeResize(width: Int, height: Int)
 	private external fun nativeRender()
 	private external fun nativeDestroy()

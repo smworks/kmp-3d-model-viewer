@@ -1,6 +1,8 @@
 #include "vkrenderer.h"
 #include <android/native_window_jni.h>
 #include <android/log.h>
+#include <android/asset_manager.h>
+#include <android/asset_manager_jni.h>
 #include <vulkan/vulkan.h>
 #include <vulkan/vulkan_android.h>
 #include <vector>
@@ -12,6 +14,7 @@
 
 struct VulkanState {
 	ANativeWindow* window = nullptr;
+	AAssetManager* assetManager = nullptr;
 	VkInstance instance = VK_NULL_HANDLE;
 	VkSurfaceKHR surface = VK_NULL_HANDLE;
 	VkPhysicalDevice physicalDevice = VK_NULL_HANDLE;
@@ -24,6 +27,8 @@ struct VulkanState {
 	std::vector<VkImage> swapchainImages;
 	std::vector<VkImageView> swapchainImageViews;
 	VkRenderPass renderPass = VK_NULL_HANDLE;
+	VkPipelineLayout pipelineLayout = VK_NULL_HANDLE;
+	VkPipeline graphicsPipeline = VK_NULL_HANDLE;
 	std::vector<VkFramebuffer> framebuffers;
 	VkCommandPool commandPool = VK_NULL_HANDLE;
 	std::vector<VkCommandBuffer> commandBuffers;
@@ -236,6 +241,121 @@ static void createRenderPass() {
 	check(vkCreateRenderPass(g.device, &rpci, nullptr, &g.renderPass), "vkCreateRenderPass");
 }
 
+static std::vector<uint32_t> loadSpirvFromAsset(const char* path) {
+	std::vector<uint32_t> words;
+	if (!g.assetManager) return words;
+	AAsset* asset = AAssetManager_open(g.assetManager, path, AASSET_MODE_STREAMING);
+	if (!asset) return words;
+	off_t len = AAsset_getLength(asset);
+	if (len > 0 && (len % 4 == 0)) {
+		words.resize(static_cast<size_t>(len) / 4);
+		int64_t read = AAsset_read(asset, words.data(), len);
+		if (read != len) {
+			words.clear();
+		}
+	}
+	AAsset_close(asset);
+	return words;
+}
+
+static VkShaderModule createShaderModule(const uint32_t* code, size_t wordCount) {
+	VkShaderModuleCreateInfo ci{};
+	ci.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
+	ci.codeSize = wordCount * sizeof(uint32_t);
+	ci.pCode = code;
+	VkShaderModule module = VK_NULL_HANDLE;
+	check(vkCreateShaderModule(g.device, &ci, nullptr, &module), "vkCreateShaderModule");
+	return module;
+}
+
+static void createPipeline() {
+	auto vertSpv = loadSpirvFromAsset("shaders/triangle.vert.spv");
+	auto fragSpv = loadSpirvFromAsset("shaders/triangle.frag.spv");
+	if (vertSpv.empty() || fragSpv.empty()) {
+		LOGE("Failed to load SPIR-V from assets");
+		return;
+	}
+	VkShaderModule vert = createShaderModule(vertSpv.data(), vertSpv.size());
+	VkShaderModule frag = createShaderModule(fragSpv.data(), fragSpv.size());
+
+	VkPipelineShaderStageCreateInfo stages[2]{};
+	stages[0].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+	stages[0].stage = VK_SHADER_STAGE_VERTEX_BIT;
+	stages[0].module = vert;
+	stages[0].pName = "main";
+	stages[1].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+	stages[1].stage = VK_SHADER_STAGE_FRAGMENT_BIT;
+	stages[1].module = frag;
+	stages[1].pName = "main";
+
+	VkPipelineVertexInputStateCreateInfo vertexInput{};
+	vertexInput.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
+
+	VkPipelineInputAssemblyStateCreateInfo inputAssembly{};
+	inputAssembly.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
+	inputAssembly.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
+	inputAssembly.primitiveRestartEnable = VK_FALSE;
+
+	VkPipelineViewportStateCreateInfo viewportState{};
+	viewportState.sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO;
+	viewportState.viewportCount = 1;
+	viewportState.scissorCount = 1;
+
+	VkPipelineRasterizationStateCreateInfo raster{};
+	raster.sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO;
+	raster.depthClampEnable = VK_FALSE;
+	raster.rasterizerDiscardEnable = VK_FALSE;
+	raster.polygonMode = VK_POLYGON_MODE_FILL;
+	raster.cullMode = VK_CULL_MODE_BACK_BIT;
+	raster.frontFace = VK_FRONT_FACE_CLOCKWISE;
+	raster.depthBiasEnable = VK_FALSE;
+	raster.lineWidth = 1.0f;
+
+	VkPipelineMultisampleStateCreateInfo multisample{};
+	multisample.sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
+	multisample.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
+
+	VkPipelineColorBlendAttachmentState colorBlendAttachment{};
+	colorBlendAttachment.colorWriteMask =
+		VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
+	colorBlendAttachment.blendEnable = VK_FALSE;
+
+	VkPipelineColorBlendStateCreateInfo colorBlend{};
+	colorBlend.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
+	colorBlend.attachmentCount = 1;
+	colorBlend.pAttachments = &colorBlendAttachment;
+
+	VkDynamicState dynamics[] = { VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR };
+	VkPipelineDynamicStateCreateInfo dynamicState{};
+	dynamicState.sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO;
+	dynamicState.dynamicStateCount = 2;
+	dynamicState.pDynamicStates = dynamics;
+
+	VkPipelineLayoutCreateInfo layoutCi{};
+	layoutCi.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+	check(vkCreatePipelineLayout(g.device, &layoutCi, nullptr, &g.pipelineLayout), "vkCreatePipelineLayout");
+
+	VkGraphicsPipelineCreateInfo gpci{};
+	gpci.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
+	gpci.stageCount = 2;
+	gpci.pStages = stages;
+	gpci.pVertexInputState = &vertexInput;
+	gpci.pInputAssemblyState = &inputAssembly;
+	gpci.pViewportState = &viewportState;
+	gpci.pRasterizationState = &raster;
+	gpci.pMultisampleState = &multisample;
+	gpci.pDepthStencilState = nullptr;
+	gpci.pColorBlendState = &colorBlend;
+	gpci.pDynamicState = &dynamicState;
+	gpci.layout = g.pipelineLayout;
+	gpci.renderPass = g.renderPass;
+	gpci.subpass = 0;
+	check(vkCreateGraphicsPipelines(g.device, VK_NULL_HANDLE, 1, &gpci, nullptr, &g.graphicsPipeline), "vkCreateGraphicsPipelines");
+
+	vkDestroyShaderModule(g.device, vert, nullptr);
+	vkDestroyShaderModule(g.device, frag, nullptr);
+}
+
 static void createFramebuffers() {
 	g.framebuffers.resize(g.swapchainImageViews.size());
 	for (size_t i = 0; i < g.swapchainImageViews.size(); ++i) {
@@ -285,6 +405,19 @@ static void recordCommandBuffers() {
 		rpbi.clearValueCount = 1;
 		rpbi.pClearValues = &clear;
 		vkCmdBeginRenderPass(g.commandBuffers[i], &rpbi, VK_SUBPASS_CONTENTS_INLINE);
+		// Dynamic viewport/scissor and draw
+		VkViewport vp{};
+		vp.x = 0.0f; vp.y = 0.0f;
+		vp.width = static_cast<float>(g.swapchainExtent.width);
+		vp.height = static_cast<float>(g.swapchainExtent.height);
+		vp.minDepth = 0.0f; vp.maxDepth = 1.0f;
+		VkRect2D sc{};
+		sc.offset = {0,0};
+		sc.extent = g.swapchainExtent;
+		vkCmdSetViewport(g.commandBuffers[i], 0, 1, &vp);
+		vkCmdSetScissor(g.commandBuffers[i], 0, 1, &sc);
+		vkCmdBindPipeline(g.commandBuffers[i], VK_PIPELINE_BIND_POINT_GRAPHICS, g.graphicsPipeline);
+		vkCmdDraw(g.commandBuffers[i], 3, 1, 0, 0);
 		vkCmdEndRenderPass(g.commandBuffers[i]);
 		check(vkEndCommandBuffer(g.commandBuffers[i]), "vkEndCommandBuffer");
 	}
@@ -308,6 +441,8 @@ static void createSyncObjects() {
 }
 
 static void cleanupSwapchain() {
+	if (g.graphicsPipeline) { vkDestroyPipeline(g.device, g.graphicsPipeline, nullptr); g.graphicsPipeline = VK_NULL_HANDLE; }
+	if (g.pipelineLayout) { vkDestroyPipelineLayout(g.device, g.pipelineLayout, nullptr); g.pipelineLayout = VK_NULL_HANDLE; }
 	for (auto f : g.framebuffers) if (f) vkDestroyFramebuffer(g.device, f, nullptr);
 	g.framebuffers.clear();
 	if (g.renderPass) { vkDestroyRenderPass(g.device, g.renderPass, nullptr); g.renderPass = VK_NULL_HANDLE; }
@@ -322,6 +457,7 @@ static void recreateSwapchain(uint32_t width, uint32_t height) {
 	createSwapchain(width, height);
 	createImageViews();
 	createRenderPass();
+	createPipeline();
 	createFramebuffers();
 	createCommandPoolBuffers();
 	recordCommandBuffers();
@@ -329,8 +465,9 @@ static void recreateSwapchain(uint32_t width, uint32_t height) {
 }
 
 JNIEXPORT void JNICALL
-Java_lt_smworks_multiplatform3dengine_vulkan_VulkanNativeRenderer_nativeInit(JNIEnv* env, jobject thiz, jobject surface) {
+Java_lt_smworks_multiplatform3dengine_vulkan_VulkanNativeRenderer_nativeInit(JNIEnv* env, jobject thiz, jobject surface, jobject assetManager) {
 	g.window = ANativeWindow_fromSurface(env, surface);
+	g.assetManager = AAssetManager_fromJava(env, assetManager);
 	uint32_t width = static_cast<uint32_t>(ANativeWindow_getWidth(g.window));
 	uint32_t height = static_cast<uint32_t>(ANativeWindow_getHeight(g.window));
 
