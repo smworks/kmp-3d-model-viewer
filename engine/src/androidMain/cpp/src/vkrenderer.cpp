@@ -337,17 +337,20 @@ Java_lt_smworks_multiplatform3dengine_vulkan_VulkanNativeRenderer_nativeRender(J
 	g.camera.applyToCommandBuffer(g.commandBuffers[imageIndex]);
 	vkCmdBindPipeline(g.commandBuffers[imageIndex], VK_PIPELINE_BIND_POINT_GRAPHICS, g.graphicsPipeline);
 	
-	// Push current camera rotation constants
-	float rotationData[3] = {
+	// Push current camera rotation constants and viewport dimensions
+	float pushConstants[5] = {
 		g.camera.getYaw(),
 		g.camera.getPitch(),
-		g.camera.getRoll()
+		g.camera.getRoll(),
+		g.camera.getWidth(),
+		g.camera.getHeight()
 	};
-	vkCmdPushConstants(g.commandBuffers[imageIndex], g.pipelineLayout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(rotationData), rotationData);
+	vkCmdPushConstants(g.commandBuffers[imageIndex], g.pipelineLayout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(pushConstants), pushConstants);
 	
 	// Debug: log rotation values occasionally (every 60 frames)
 	if (g.currentFrame % 60 == 0) {
-		LOGI("Pushing rotation: yaw=%.3f pitch=%.3f roll=%.3f", rotationData[0], rotationData[1], rotationData[2]);
+		LOGI("Pushing rotation: yaw=%.3f pitch=%.3f roll=%.3f w=%.0f h=%.0f", 
+			pushConstants[0], pushConstants[1], pushConstants[2], pushConstants[3], pushConstants[4]);
 	}
 	
 	VkDeviceSize offsets[] = {0};

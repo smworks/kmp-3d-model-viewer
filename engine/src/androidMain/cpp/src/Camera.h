@@ -17,6 +17,11 @@ public:
 	// Get scissor configuration
 	const VkRect2D& getScissor() const { return scissor; }
 	
+	// Get viewport dimensions
+	float getWidth() const { return viewport.width; }
+	float getHeight() const { return viewport.height; }
+	float getAspectRatio() const { return viewport.width > 0 ? viewport.width / viewport.height : 1.0f; }
+	
 	// Apply viewport and scissor to a command buffer
 	void applyToCommandBuffer(VkCommandBuffer commandBuffer) const;
 

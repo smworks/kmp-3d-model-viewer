@@ -291,11 +291,11 @@ VulkanBuilder& VulkanBuilder::buildPipeline() {
 	dynamicState.dynamicStateCount = 2;
 	dynamicState.pDynamicStates = dynamics;
 
-	// Push constants for camera rotation (3 floats: yaw, pitch, roll)
+	// Push constants for camera rotation and aspect ratio (5 floats: yaw, pitch, roll, width, height)
 	VkPushConstantRange pushConstantRange{};
 	pushConstantRange.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
 	pushConstantRange.offset = 0;
-	pushConstantRange.size = sizeof(float) * 3; // 3 floats: yaw, pitch, roll
+	pushConstantRange.size = sizeof(float) * 5; // 5 floats: yaw, pitch, roll, width, height
 	
 	VkPipelineLayoutCreateInfo layoutCi{};
 	layoutCi.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;

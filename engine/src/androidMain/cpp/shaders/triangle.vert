@@ -7,6 +7,8 @@ layout(push_constant) uniform PushConstants {
 	float yaw;
 	float pitch;
 	float roll;
+	float width;
+	float height;
 } pc;
 
 mat4 rotationMatrix(vec3 axis, float angle) {
@@ -35,12 +37,26 @@ void main() {
 	mat4 rotZ = rotationMatrix(vec3(0.0, 0.0, 1.0), pc.roll);
 	
 	mat4 rotation = rotZ * rotX * rotY;
-	vec4 rotatedPos = rotation * vec4(scaledPos, 1.0);
+	vec4 worldPos = rotation * vec4(scaledPos, 1.0);
 	
-	// Simple orthographic projection to NDC [-1, 1]
-	// Map from roughly [-2, 2] to [-1, 1] with some margin
-	float scale = 0.3; // Make it smaller to fit in view
-	gl_Position = vec4(rotatedPos.xy * scale, rotatedPos.z * 0.1, 1.0);
+	// Simple view transform: move the cube away from the camera along -Z
+	vec4 viewPos = worldPos + vec4(0.0, 0.0, -4.0, 0.0);
+	
+	// Perspective projection using vertical FOV of 60 degrees
+	float aspect = pc.width > 0.0 ? pc.width / pc.height : 1.0;
+	float nearPlane = 0.1;
+	float farPlane = 50.0;
+	float fov = radians(60.0);
+	float f = 1.0 / tan(fov * 0.5);
+	
+	mat4 proj = mat4(
+		vec4(f / aspect, 0.0, 0.0, 0.0),
+		vec4(0.0, f, 0.0, 0.0),
+		vec4(0.0, 0.0, -(farPlane + nearPlane) / (farPlane - nearPlane), -1.0),
+		vec4(0.0, 0.0, -(2.0 * farPlane * nearPlane) / (farPlane - nearPlane), 0.0)
+	);
+	
+	gl_Position = proj * viewPos;
 }
 
 
