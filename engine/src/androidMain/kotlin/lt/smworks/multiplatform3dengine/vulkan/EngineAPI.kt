@@ -4,7 +4,7 @@ import android.view.Surface
 import android.content.res.AssetManager
 import java.util.concurrent.atomic.AtomicBoolean
 
-actual class EngineAPI {
+actual class EngineAPI actual constructor() {
     private val running = AtomicBoolean(false)
     private var thread: Thread? = null
 
@@ -39,6 +39,14 @@ actual class EngineAPI {
         nativeRotateCamera(yaw, pitch, roll)
     }
 
+    actual fun loadModel() {
+        nativeLoadModel()
+    }
+
+    actual fun moveCamera(delta: Float) {
+        nativeMoveCamera(delta)
+    }
+
     fun setupForGestures() {
         // Store this renderer instance for gesture handling
         setCurrentRendererForGestures(this)
@@ -54,6 +62,8 @@ actual class EngineAPI {
     private external fun nativeRender()
     private external fun nativeRotateCamera(yaw: Float, pitch: Float, roll: Float)
     private external fun nativeDestroy()
+    private external fun nativeLoadModel()
+    private external fun nativeMoveCamera(delta: Float)
 }
 
 

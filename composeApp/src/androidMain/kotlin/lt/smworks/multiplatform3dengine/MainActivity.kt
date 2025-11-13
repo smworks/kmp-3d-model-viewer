@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -36,6 +37,9 @@ fun AndroidSample() {
 
 		if (supported) {
 			val engine = rememberEngineApi()
+            LaunchedEffect(Unit) {
+                engine.moveCamera(-500.1f)
+            }
 
 			VulkanScreen(
 				modifier = Modifier.fillMaxSize(),

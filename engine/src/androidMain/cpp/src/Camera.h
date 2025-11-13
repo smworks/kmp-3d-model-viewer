@@ -40,6 +40,12 @@ public:
 	void setPitch(float angle) { pitch = angle; }
 	void setRoll(float angle) { roll = angle; }
 
+	// Movement along the forward axis (negative Z in world space)
+	void move(float delta);
+
+	// Current camera distance along Z (negative values mean the camera is farther back)
+	float getDistance() const { return distance; }
+
 private:
 	VkViewport viewport{};
 	VkRect2D scissor{};
@@ -48,5 +54,7 @@ private:
 	float yaw = 0.0f;    // Rotation around Y axis
 	float pitch = 0.0f;  // Rotation around X axis
 	float roll = 0.0f;   // Rotation around Z axis
+
+	float distance = -4.0f; // Translation along Z for simple view transform
 };
 

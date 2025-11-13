@@ -7,7 +7,7 @@
 #include <vulkan/vulkan_android.h>
 #include <vector>
 #include <cstring>
-#include "Model.h"
+#include "ModelLoader.h"
 #include "VulkanBuilder.h"
 #include "Camera.h"
 
@@ -89,23 +89,30 @@ static void createBuffer(VkDeviceSize size, VkBufferUsageFlags usage, VkMemoryPr
 	check(vkBindBufferMemory(g.device, buffer, memory, 0), "vkBindBufferMemory");
 }
 
-static void uploadModelBuffers() {
-	Model cube = createCubeModel();
-	g.indexCount = static_cast<uint32_t>(cube.indices.size());
+static void destroyModelBuffers() {
+	if (g.indexBuffer) { vkDestroyBuffer(g.device, g.indexBuffer, nullptr); g.indexBuffer = VK_NULL_HANDLE; }
+	if (g.indexMemory) { vkFreeMemory(g.device, g.indexMemory, nullptr); g.indexMemory = VK_NULL_HANDLE; }
+	if (g.vertexBuffer) { vkDestroyBuffer(g.device, g.vertexBuffer, nullptr); g.vertexBuffer = VK_NULL_HANDLE; }
+	if (g.vertexMemory) { vkFreeMemory(g.device, g.vertexMemory, nullptr); g.vertexMemory = VK_NULL_HANDLE; }
+}
 
-	VkDeviceSize vsize = sizeof(float) * cube.positions.size();
-	VkDeviceSize isize = sizeof(uint16_t) * cube.indices.size();
+static void uploadModelBuffers() {
+	Model model = loadModel();
+	g.indexCount = static_cast<uint32_t>(model.indices.size());
+
+	VkDeviceSize vsize = sizeof(float) * model.positions.size();
+	VkDeviceSize isize = sizeof(uint16_t) * model.indices.size();
 
 	createBuffer(vsize, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, g.vertexBuffer, g.vertexMemory);
 	createBuffer(isize, VK_BUFFER_USAGE_INDEX_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, g.indexBuffer, g.indexMemory);
 
 	void* data = nullptr;
 	check(vkMapMemory(g.device, g.vertexMemory, 0, vsize, 0, &data), "vkMapMemory(vertex)");
-	memcpy(data, cube.positions.data(), (size_t)vsize);
+	memcpy(data, model.positions.data(), (size_t)vsize);
 	vkUnmapMemory(g.device, g.vertexMemory);
 
 	check(vkMapMemory(g.device, g.indexMemory, 0, isize, 0, &data), "vkMapMemory(index)");
-	memcpy(data, cube.indices.data(), (size_t)isize);
+	memcpy(data, model.indices.data(), (size_t)isize);
 	vkUnmapMemory(g.device, g.indexMemory);
 }
 
@@ -191,11 +198,14 @@ static void recordCommandBuffers() {
 		g.camera.applyToCommandBuffer(g.commandBuffers[i]);
 		vkCmdBindPipeline(g.commandBuffers[i], VK_PIPELINE_BIND_POINT_GRAPHICS, g.graphicsPipeline);
 		
-		// Push camera rotation constants
-		float rotationData[3] = {
+		// Push camera constants
+		float rotationData[6] = {
 			g.camera.getYaw(),
 			g.camera.getPitch(),
-			g.camera.getRoll()
+			g.camera.getRoll(),
+			g.camera.getWidth(),
+			g.camera.getHeight(),
+			g.camera.getDistance()
 		};
 		vkCmdPushConstants(g.commandBuffers[i], g.pipelineLayout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(rotationData), rotationData);
 		
@@ -226,10 +236,7 @@ static void createSyncObjects() {
 }
 
 static void cleanupSwapchain() {
-	if (g.indexBuffer) { vkDestroyBuffer(g.device, g.indexBuffer, nullptr); g.indexBuffer = VK_NULL_HANDLE; }
-	if (g.indexMemory) { vkFreeMemory(g.device, g.indexMemory, nullptr); g.indexMemory = VK_NULL_HANDLE; }
-	if (g.vertexBuffer) { vkDestroyBuffer(g.device, g.vertexBuffer, nullptr); g.vertexBuffer = VK_NULL_HANDLE; }
-	if (g.vertexMemory) { vkFreeMemory(g.device, g.vertexMemory, nullptr); g.vertexMemory = VK_NULL_HANDLE; }
+	destroyModelBuffers();
 	g.builder->cleanupSwapchain();
 	for (auto f : g.framebuffers) if (f) vkDestroyFramebuffer(g.device, f, nullptr);
 	g.framebuffers.clear();
@@ -302,6 +309,20 @@ Java_lt_smworks_multiplatform3dengine_vulkan_EngineAPI_nativeResize(JNIEnv* env,
 }
 
 JNIEXPORT void JNICALL
+Java_lt_smworks_multiplatform3dengine_vulkan_EngineAPI_nativeLoadModel(JNIEnv* env, jobject thiz) {
+	if (!g.initialized) return;
+	vkDeviceWaitIdle(g.device);
+	destroyModelBuffers();
+	uploadModelBuffers();
+}
+
+JNIEXPORT void JNICALL
+Java_lt_smworks_multiplatform3dengine_vulkan_EngineAPI_nativeMoveCamera(JNIEnv* env, jobject thiz, jfloat delta) {
+	if (!g.initialized) return;
+	g.camera.move(static_cast<float>(delta));
+}
+
+JNIEXPORT void JNICALL
 Java_lt_smworks_multiplatform3dengine_vulkan_EngineAPI_nativeRender(JNIEnv* env, jobject thiz) {
 	if (!g.initialized) return;
 	size_t i = g.currentFrame % g.commandBuffers.size();
@@ -338,12 +359,13 @@ Java_lt_smworks_multiplatform3dengine_vulkan_EngineAPI_nativeRender(JNIEnv* env,
 	vkCmdBindPipeline(g.commandBuffers[imageIndex], VK_PIPELINE_BIND_POINT_GRAPHICS, g.graphicsPipeline);
 	
 	// Push current camera rotation constants and viewport dimensions
-	float pushConstants[5] = {
+	float pushConstants[6] = {
 		g.camera.getYaw(),
 		g.camera.getPitch(),
 		g.camera.getRoll(),
 		g.camera.getWidth(),
-		g.camera.getHeight()
+		g.camera.getHeight(),
+		g.camera.getDistance()
 	};
 	vkCmdPushConstants(g.commandBuffers[imageIndex], g.pipelineLayout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(pushConstants), pushConstants);
 	

@@ -16,6 +16,7 @@ Camera::Camera() {
 	yaw = 0.0f;
 	pitch = 0.0f;
 	roll = 0.0f;
+	distance = -4.0f;
 }
 
 void Camera::updateViewport(const VkExtent2D& extent) {
@@ -57,5 +58,14 @@ void Camera::rotateRoll(float angle) {
 	const float twoPi = 2.0f * 3.14159265359f;
 	while (roll > twoPi) roll -= twoPi;
 	while (roll < -twoPi) roll += twoPi;
+}
+
+void Camera::move(float delta) {
+	distance += delta;
+	// Prevent the camera from crossing the origin or moving too far away.
+	const float minDistance = -50.0f;
+	const float maxDistance = -1.0f;
+	if (distance < minDistance) distance = minDistance;
+	if (distance > maxDistance) distance = maxDistance;
 }
 
