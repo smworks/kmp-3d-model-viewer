@@ -32,16 +32,13 @@ mat4 rotationMatrix(vec3 axis, float angle) {
 }
 
 void main() {
-	// Scale up the cube for better visibility (2x scale)
-	vec3 scaledPos = inPos * 2.0;
-	
 	// Apply rotations: first yaw (Y-axis), then pitch (X-axis), then roll (Z-axis)
 	mat4 rotY = rotationMatrix(vec3(0.0, 1.0, 0.0), pc.yaw);
 	mat4 rotX = rotationMatrix(vec3(1.0, 0.0, 0.0), pc.pitch);
 	mat4 rotZ = rotationMatrix(vec3(0.0, 0.0, 1.0), pc.roll);
 	
 	mat4 rotation = rotZ * rotX * rotY;
-	vec4 worldPos = rotation * vec4(scaledPos, 1.0);
+	vec4 worldPos = rotation * vec4(inPos, 1.0);
 	worldPos.xyz += vec3(pc.modelX, pc.modelY, pc.modelZ);
 	
 	// Simple view transform: move the model along the camera's forward axis (negative Z)

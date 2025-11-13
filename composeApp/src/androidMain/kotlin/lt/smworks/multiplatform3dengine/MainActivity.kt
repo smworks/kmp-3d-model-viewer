@@ -38,8 +38,8 @@ fun AndroidSample() {
 		if (supported) {
 			val engine = rememberEngineApi()
             LaunchedEffect(Unit) {
-                engine.moveCamera(-500.1f)
-				engine.loadModel(1f, 0f, 0f)
+                engine.moveCamera(-20.1f)
+				engine.loadModel(5f, 0f, 0f)
                 engine.loadModel(0f, 0f, 0f)
             }
 
