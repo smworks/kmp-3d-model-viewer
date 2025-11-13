@@ -9,6 +9,7 @@
 #include <cstring>
 #include "Model.h"
 #include "VulkanBuilder.h"
+#include "Camera.h"
 
 #define LOG_TAG "VKRenderer"
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO, LOG_TAG, __VA_ARGS__)
@@ -45,6 +46,7 @@ struct VulkanState {
 	std::vector<VkFence> inFlightFences;
 	size_t currentFrame = 0;
 	bool initialized = false;
+	Camera camera;
 };
 
 static VulkanState g;
@@ -185,17 +187,8 @@ static void recordCommandBuffers() {
 		rpbi.clearValueCount = 1;
 		rpbi.pClearValues = &clear;
 		vkCmdBeginRenderPass(g.commandBuffers[i], &rpbi, VK_SUBPASS_CONTENTS_INLINE);
-		// Dynamic viewport/scissor and draw
-		VkViewport vp{};
-		vp.x = 0.0f; vp.y = 0.0f;
-		vp.width = static_cast<float>(g.swapchainExtent.width);
-		vp.height = static_cast<float>(g.swapchainExtent.height);
-		vp.minDepth = 0.0f; vp.maxDepth = 1.0f;
-		VkRect2D sc{};
-		sc.offset = {0,0};
-		sc.extent = g.swapchainExtent;
-		vkCmdSetViewport(g.commandBuffers[i], 0, 1, &vp);
-		vkCmdSetScissor(g.commandBuffers[i], 0, 1, &sc);
+		// Apply camera viewport/scissor and draw
+		g.camera.applyToCommandBuffer(g.commandBuffers[i]);
 		vkCmdBindPipeline(g.commandBuffers[i], VK_PIPELINE_BIND_POINT_GRAPHICS, g.graphicsPipeline);
 		VkDeviceSize offsets[] = {0};
 		vkCmdBindVertexBuffers(g.commandBuffers[i], 0, 1, &g.vertexBuffer, offsets);
@@ -243,6 +236,7 @@ static void recreateSwapchain(uint32_t width, uint32_t height) {
 	g.swapchainExtent = g.builder->getSwapchainExtent();
 	g.swapchainImages = g.builder->getSwapchainImages();
 	g.swapchainImageViews = g.builder->getSwapchainImageViews();
+	g.camera.updateViewport(g.swapchainExtent);
 	buildPipelineWithBuilder();
 	uploadModelBuffers();
 	createFramebuffers();
@@ -278,6 +272,7 @@ Java_lt_smworks_multiplatform3dengine_vulkan_VulkanNativeRenderer_nativeInit(JNI
 	g.swapchainExtent = g.builder->getSwapchainExtent();
 	g.swapchainImages = g.builder->getSwapchainImages();
 	g.swapchainImageViews = g.builder->getSwapchainImageViews();
+	g.camera.updateViewport(g.swapchainExtent);
 	// Build render pass and pipeline via builder
 	buildPipelineWithBuilder();
 	// proceed with buffers/command buffers

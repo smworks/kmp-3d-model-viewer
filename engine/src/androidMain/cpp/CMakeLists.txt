@@ -47,6 +47,8 @@ add_library(vkrenderer SHARED
 	src/vkrenderer.h
 	src/VulkanBuilder.cpp
 	src/VulkanBuilder.h
+	src/Camera.cpp
+	src/Camera.h
 	src/Model.h
 )
 
