@@ -23,17 +23,9 @@ internal fun setCurrentRendererForGestures(renderer: EngineAPI) {
 
 @Composable
 actual fun VulkanScreen(
-    modifier: Modifier
+    modifier: Modifier,
+    engine: EngineAPI
 ) {
-    val renderer = remember { EngineAPI() }
-    renderer.setupForGestures()
-
-    DisposableEffect(Unit) {
-        onDispose {
-            renderer.destroy()
-        }
-    }
-
     AndroidView(
         modifier = modifier,
         factory = { context ->
@@ -42,8 +34,8 @@ actual fun VulkanScreen(
                     override fun surfaceCreated(holder: SurfaceHolder) {
                         val surface = holder.surface
                         if (surface != null && surface.isValid) {
-                            renderer.init(surface, context.assets)
-                            renderer.start()
+                            engine.init(surface, context.assets)
+                            engine.start()
                         }
                     }
 
@@ -51,7 +43,7 @@ actual fun VulkanScreen(
                     }
 
                     override fun surfaceDestroyed(holder: SurfaceHolder) {
-                        renderer.destroy()
+                        engine.destroy()
                     }
                 })
 
@@ -98,5 +90,16 @@ actual fun VulkanScreen(
     )
 }
 
+@Composable
+fun rememberEngineApi(): EngineAPI {
+	val engine = remember { EngineAPI() }
 
+	DisposableEffect(engine) {
+		engine.setupForGestures()
+		onDispose {
+			engine.destroy()
+		}
+	}
 
+	return engine
+}

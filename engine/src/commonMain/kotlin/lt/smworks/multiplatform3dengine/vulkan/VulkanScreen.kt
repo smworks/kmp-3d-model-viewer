@@ -5,7 +5,8 @@ import androidx.compose.ui.Modifier
 
 @Composable
 expect fun VulkanScreen(
-	modifier: Modifier = Modifier
+	modifier: Modifier = Modifier,
+	engine: EngineAPI
 )
 
 expect class VulkanRenderTarget

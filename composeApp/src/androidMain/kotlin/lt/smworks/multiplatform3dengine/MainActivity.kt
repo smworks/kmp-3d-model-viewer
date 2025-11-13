@@ -14,6 +14,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.tooling.preview.Preview
 import lt.smworks.multiplatform3dengine.vulkan.VulkanScreen
 import lt.smworks.multiplatform3dengine.vulkan.VulkanSupport
+import lt.smworks.multiplatform3dengine.vulkan.rememberEngineApi
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -34,7 +35,12 @@ fun AndroidSample() {
 
 
 		if (supported) {
-			VulkanScreen(modifier = Modifier.fillMaxSize())
+			val engine = rememberEngineApi()
+
+			VulkanScreen(
+				modifier = Modifier.fillMaxSize(),
+				engine = engine
+			)
 		} else {
 			Text("Vulkan not supported on this device/emulator")
 		}

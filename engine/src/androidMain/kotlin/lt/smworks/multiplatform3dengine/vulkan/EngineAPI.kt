@@ -4,7 +4,7 @@ import android.view.Surface
 import android.content.res.AssetManager
 import java.util.concurrent.atomic.AtomicBoolean
 
-class EngineAPI {
+actual class EngineAPI {
     private val running = AtomicBoolean(false)
     private var thread: Thread? = null
 

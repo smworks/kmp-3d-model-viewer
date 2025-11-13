@@ -7,12 +7,12 @@ import androidx.compose.ui.Modifier
 actual class VulkanRenderTarget
 
 @Composable
+@Suppress("UNUSED_PARAMETER")
 actual fun VulkanScreen(
 	modifier: Modifier,
-	onCreate: (VulkanRenderTarget) -> Unit,
-	onDestroy: () -> Unit
+	engine: EngineAPI
 ) {
-	Text("Vulkan screen is not available on iOS")
+	Text("Vulkan screen is not available on iOS", modifier = modifier)
 }
 
 
