@@ -255,7 +255,7 @@ static void recreateSwapchain(uint32_t width, uint32_t height) {
 }
 
 JNIEXPORT void JNICALL
-Java_lt_smworks_multiplatform3dengine_vulkan_VulkanNativeRenderer_nativeInit(JNIEnv* env, jobject thiz, jobject surface, jobject assetManager) {
+Java_lt_smworks_multiplatform3dengine_vulkan_EngineAPI_nativeInit(JNIEnv* env, jobject thiz, jobject surface, jobject assetManager) {
 	g.window = ANativeWindow_fromSurface(env, surface);
 	g.assetManager = AAssetManager_fromJava(env, assetManager);
 	uint32_t width = static_cast<uint32_t>(ANativeWindow_getWidth(g.window));
@@ -295,14 +295,14 @@ Java_lt_smworks_multiplatform3dengine_vulkan_VulkanNativeRenderer_nativeInit(JNI
 }
 
 JNIEXPORT void JNICALL
-Java_lt_smworks_multiplatform3dengine_vulkan_VulkanNativeRenderer_nativeResize(JNIEnv* env, jobject thiz, jint width, jint height) {
+Java_lt_smworks_multiplatform3dengine_vulkan_EngineAPI_nativeResize(JNIEnv* env, jobject thiz, jint width, jint height) {
 	if (!g.initialized) return;
 	if (width <= 0 || height <= 0) return;
 	recreateSwapchain(static_cast<uint32_t>(width), static_cast<uint32_t>(height));
 }
 
 JNIEXPORT void JNICALL
-Java_lt_smworks_multiplatform3dengine_vulkan_VulkanNativeRenderer_nativeRender(JNIEnv* env, jobject thiz) {
+Java_lt_smworks_multiplatform3dengine_vulkan_EngineAPI_nativeRender(JNIEnv* env, jobject thiz) {
 	if (!g.initialized) return;
 	size_t i = g.currentFrame % g.commandBuffers.size();
 	check(vkWaitForFences(g.device, 1, &g.inFlightFences[i], VK_TRUE, UINT64_MAX), "vkWaitForFences");
@@ -380,7 +380,7 @@ Java_lt_smworks_multiplatform3dengine_vulkan_VulkanNativeRenderer_nativeRender(J
 }
 
 JNIEXPORT void JNICALL
-Java_lt_smworks_multiplatform3dengine_vulkan_VulkanNativeRenderer_nativeDestroy(JNIEnv* env, jobject thiz) {
+Java_lt_smworks_multiplatform3dengine_vulkan_EngineAPI_nativeDestroy(JNIEnv* env, jobject thiz) {
 	if (!g.initialized) return;
 	vkDeviceWaitIdle(g.device);
 	for (size_t i = 0; i < g.imageAvailable.size(); ++i) {
@@ -403,7 +403,7 @@ Java_lt_smworks_multiplatform3dengine_vulkan_VulkanNativeRenderer_nativeDestroy(
 }
 
 JNIEXPORT void JNICALL
-Java_lt_smworks_multiplatform3dengine_vulkan_VulkanNativeRenderer_nativeRotateCamera(JNIEnv* env, jobject thiz, jfloat yaw, jfloat pitch, jfloat roll) {
+Java_lt_smworks_multiplatform3dengine_vulkan_EngineAPI_nativeRotateCamera(JNIEnv* env, jobject thiz, jfloat yaw, jfloat pitch, jfloat roll) {
 	if (!g.initialized) return;
 	if (yaw != 0.0f) g.camera.rotateYaw(static_cast<float>(yaw));
 	if (pitch != 0.0f) g.camera.rotatePitch(static_cast<float>(pitch));

@@ -14,10 +14,10 @@ import kotlin.math.abs
 actual typealias VulkanRenderTarget = Surface
 
 // Store the current renderer instance for gesture handling
-private var currentRenderer: VulkanNativeRenderer? = null
+private var currentRenderer: EngineAPI? = null
 
-// Function to set the current renderer (called from VulkanNativeRenderer)
-internal fun setCurrentRendererForGestures(renderer: VulkanNativeRenderer) {
+// Function to set the current renderer (called from EngineAPI)
+internal fun setCurrentRendererForGestures(renderer: EngineAPI) {
     currentRenderer = renderer
 }
 
@@ -25,7 +25,7 @@ internal fun setCurrentRendererForGestures(renderer: VulkanNativeRenderer) {
 actual fun VulkanScreen(
     modifier: Modifier
 ) {
-    val renderer = remember { VulkanNativeRenderer() }
+    val renderer = remember { EngineAPI() }
     renderer.setupForGestures()
 
     DisposableEffect(Unit) {
