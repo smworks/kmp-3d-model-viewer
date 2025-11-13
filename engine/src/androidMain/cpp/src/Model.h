@@ -3,10 +3,29 @@
 #include <vector>
 #include <cstdint>
 
-// Simple 3D model container for positions and indices.
+// Simple 3D model container for geometry data and transform.
 struct Model {
 	std::vector<float> positions;   // xyz sequence
 	std::vector<uint16_t> indices;  // triangle indices
+	float position[3] = { 0.0f, 0.0f, 0.0f }; // model translation
+
+	void setPosition(float x, float y, float z) {
+		position[0] = x;
+		position[1] = y;
+		position[2] = z;
+	}
+
+	size_t vertexCount() const {
+		return positions.size() / 3;
+	}
+
+	size_t indexCount() const {
+		return indices.size();
+	}
+
+	bool hasGeometry() const {
+		return !positions.empty() && !indices.empty();
+	}
 };
 
 // Creates a unit cube centered at origin.

@@ -7,6 +7,7 @@
 #include <vulkan/vulkan_android.h>
 #include <vector>
 #include <cstring>
+#include <utility>
 #include "ModelLoader.h"
 #include "VulkanBuilder.h"
 #include "Camera.h"
@@ -14,6 +15,14 @@
 #define LOG_TAG "VKRenderer"
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO, LOG_TAG, __VA_ARGS__)
 #define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, LOG_TAG, __VA_ARGS__)
+
+struct GpuModel {
+	Model cpu;
+	VkBuffer vertexBuffer = VK_NULL_HANDLE;
+	VkDeviceMemory vertexMemory = VK_NULL_HANDLE;
+	VkBuffer indexBuffer = VK_NULL_HANDLE;
+	VkDeviceMemory indexMemory = VK_NULL_HANDLE;
+};
 
 struct VulkanState {
 	ANativeWindow* window = nullptr;
@@ -33,11 +42,6 @@ struct VulkanState {
 	VkRenderPass renderPass = VK_NULL_HANDLE;
 	VkPipelineLayout pipelineLayout = VK_NULL_HANDLE;
 	VkPipeline graphicsPipeline = VK_NULL_HANDLE;
-	VkBuffer vertexBuffer = VK_NULL_HANDLE;
-	VkDeviceMemory vertexMemory = VK_NULL_HANDLE;
-	VkBuffer indexBuffer = VK_NULL_HANDLE;
-	VkDeviceMemory indexMemory = VK_NULL_HANDLE;
-	uint32_t indexCount = 0;
 	std::vector<VkFramebuffer> framebuffers;
 	VkCommandPool commandPool = VK_NULL_HANDLE;
 	std::vector<VkCommandBuffer> commandBuffers;
@@ -47,8 +51,7 @@ struct VulkanState {
 	size_t currentFrame = 0;
 	bool initialized = false;
 	Camera camera;
-	bool modelLoaded = false;
-	float modelOffset[3] = {0.0f, 0.0f, 0.0f};
+	std::vector<GpuModel> models;
 };
 
 static VulkanState g;
@@ -91,35 +94,51 @@ static void createBuffer(VkDeviceSize size, VkBufferUsageFlags usage, VkMemoryPr
 	check(vkBindBufferMemory(g.device, buffer, memory, 0), "vkBindBufferMemory");
 }
 
-static void destroyModelBuffers() {
-	if (g.indexBuffer) { vkDestroyBuffer(g.device, g.indexBuffer, nullptr); g.indexBuffer = VK_NULL_HANDLE; }
-	if (g.indexMemory) { vkFreeMemory(g.device, g.indexMemory, nullptr); g.indexMemory = VK_NULL_HANDLE; }
-	if (g.vertexBuffer) { vkDestroyBuffer(g.device, g.vertexBuffer, nullptr); g.vertexBuffer = VK_NULL_HANDLE; }
-	if (g.vertexMemory) { vkFreeMemory(g.device, g.vertexMemory, nullptr); g.vertexMemory = VK_NULL_HANDLE; }
-	g.indexCount = 0;
+static void destroyGpuBuffers(GpuModel& gpuModel) {
+	if (g.device && gpuModel.indexBuffer) {
+		vkDestroyBuffer(g.device, gpuModel.indexBuffer, nullptr);
+	}
+	if (g.device && gpuModel.indexMemory) {
+		vkFreeMemory(g.device, gpuModel.indexMemory, nullptr);
+	}
+	if (g.device && gpuModel.vertexBuffer) {
+		vkDestroyBuffer(g.device, gpuModel.vertexBuffer, nullptr);
+	}
+	if (g.device && gpuModel.vertexMemory) {
+		vkFreeMemory(g.device, gpuModel.vertexMemory, nullptr);
+	}
+	gpuModel.indexBuffer = VK_NULL_HANDLE;
+	gpuModel.indexMemory = VK_NULL_HANDLE;
+	gpuModel.vertexBuffer = VK_NULL_HANDLE;
+	gpuModel.vertexMemory = VK_NULL_HANDLE;
 }
 
-static void uploadModelBuffers(float x, float y, float z) {
-	Model model = loadModel();
-	g.indexCount = static_cast<uint32_t>(model.indices.size());
-	g.modelOffset[0] = x;
-	g.modelOffset[1] = y;
-	g.modelOffset[2] = z;
+static void destroyAllModelBuffers() {
+	for (auto& model : g.models) {
+		destroyGpuBuffers(model);
+	}
+}
 
-	VkDeviceSize vsize = sizeof(float) * model.positions.size();
-	VkDeviceSize isize = sizeof(uint16_t) * model.indices.size();
+static void uploadGpuBuffers(GpuModel& gpuModel) {
+	if (!g.device) return;
+	if (!gpuModel.cpu.hasGeometry()) return;
 
-	createBuffer(vsize, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, g.vertexBuffer, g.vertexMemory);
-	createBuffer(isize, VK_BUFFER_USAGE_INDEX_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, g.indexBuffer, g.indexMemory);
+	destroyGpuBuffers(gpuModel);
+
+	VkDeviceSize vsize = sizeof(float) * gpuModel.cpu.positions.size();
+	VkDeviceSize isize = sizeof(uint16_t) * gpuModel.cpu.indices.size();
+
+	createBuffer(vsize, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, gpuModel.vertexBuffer, gpuModel.vertexMemory);
+	createBuffer(isize, VK_BUFFER_USAGE_INDEX_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, gpuModel.indexBuffer, gpuModel.indexMemory);
 
 	void* data = nullptr;
-	check(vkMapMemory(g.device, g.vertexMemory, 0, vsize, 0, &data), "vkMapMemory(vertex)");
-	memcpy(data, model.positions.data(), (size_t)vsize);
-	vkUnmapMemory(g.device, g.vertexMemory);
+	check(vkMapMemory(g.device, gpuModel.vertexMemory, 0, vsize, 0, &data), "vkMapMemory(vertex)");
+	memcpy(data, gpuModel.cpu.positions.data(), (size_t)vsize);
+	vkUnmapMemory(g.device, gpuModel.vertexMemory);
 
-	check(vkMapMemory(g.device, g.indexMemory, 0, isize, 0, &data), "vkMapMemory(index)");
-	memcpy(data, model.indices.data(), (size_t)isize);
-	vkUnmapMemory(g.device, g.indexMemory);
+	check(vkMapMemory(g.device, gpuModel.indexMemory, 0, isize, 0, &data), "vkMapMemory(index)");
+	memcpy(data, gpuModel.cpu.indices.data(), (size_t)isize);
+	vkUnmapMemory(g.device, gpuModel.indexMemory);
 }
 
 static std::vector<uint32_t> loadSpirvFromAsset(const char* path) {
@@ -203,7 +222,11 @@ static void recordCommandBuffers() {
 		// Apply camera viewport/scissor and draw
 		g.camera.applyToCommandBuffer(g.commandBuffers[i]);
 		vkCmdBindPipeline(g.commandBuffers[i], VK_PIPELINE_BIND_POINT_GRAPHICS, g.graphicsPipeline);
-		if (g.indexCount > 0 && g.vertexBuffer && g.indexBuffer) {
+		for (const auto& model : g.models) {
+			if (!model.cpu.hasGeometry() || !model.vertexBuffer || !model.indexBuffer) {
+				continue;
+			}
+
 			float pushConstants[9] = {
 				g.camera.getYaw(),
 				g.camera.getPitch(),
@@ -211,16 +234,17 @@ static void recordCommandBuffers() {
 				g.camera.getWidth(),
 				g.camera.getHeight(),
 				g.camera.getDistance(),
-				g.modelOffset[0],
-				g.modelOffset[1],
-				g.modelOffset[2]
+				model.cpu.position[0],
+				model.cpu.position[1],
+				model.cpu.position[2]
 			};
 			vkCmdPushConstants(g.commandBuffers[i], g.pipelineLayout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(pushConstants), pushConstants);
-			
+
 			VkDeviceSize offsets[] = {0};
-			vkCmdBindVertexBuffers(g.commandBuffers[i], 0, 1, &g.vertexBuffer, offsets);
-			vkCmdBindIndexBuffer(g.commandBuffers[i], g.indexBuffer, 0, VK_INDEX_TYPE_UINT16);
-			vkCmdDrawIndexed(g.commandBuffers[i], g.indexCount, 1, 0, 0, 0);
+			VkBuffer vertexBuffer = model.vertexBuffer;
+			vkCmdBindVertexBuffers(g.commandBuffers[i], 0, 1, &vertexBuffer, offsets);
+			vkCmdBindIndexBuffer(g.commandBuffers[i], model.indexBuffer, 0, VK_INDEX_TYPE_UINT16);
+			vkCmdDrawIndexed(g.commandBuffers[i], static_cast<uint32_t>(model.cpu.indexCount()), 1, 0, 0, 0);
 		}
 		vkCmdEndRenderPass(g.commandBuffers[i]);
 		check(vkEndCommandBuffer(g.commandBuffers[i]), "vkEndCommandBuffer");
@@ -245,7 +269,7 @@ static void createSyncObjects() {
 }
 
 static void cleanupSwapchain() {
-	destroyModelBuffers();
+	destroyAllModelBuffers();
 	g.builder->cleanupSwapchain();
 	for (auto f : g.framebuffers) if (f) vkDestroyFramebuffer(g.device, f, nullptr);
 	g.framebuffers.clear();
@@ -263,8 +287,8 @@ static void recreateSwapchain(uint32_t width, uint32_t height) {
 	g.swapchainImageViews = g.builder->getSwapchainImageViews();
 	g.camera.updateViewport(g.swapchainExtent);
 	buildPipelineWithBuilder();
-	if (g.modelLoaded) {
-		uploadModelBuffers(g.modelOffset[0], g.modelOffset[1], g.modelOffset[2]);
+	for (auto& model : g.models) {
+		uploadGpuBuffers(model);
 	}
 	createFramebuffers();
 	createCommandPoolBuffers();
@@ -303,8 +327,8 @@ Java_lt_smworks_multiplatform3dengine_vulkan_EngineAPI_nativeInit(JNIEnv* env, j
 	// Build render pass and pipeline via builder
 	buildPipelineWithBuilder();
 	// proceed with buffers/command buffers
-	if (g.modelLoaded) {
-		uploadModelBuffers(g.modelOffset[0], g.modelOffset[1], g.modelOffset[2]);
+	for (auto& model : g.models) {
+		uploadGpuBuffers(model);
 	}
 	createFramebuffers();
 	createCommandPoolBuffers();
@@ -323,11 +347,22 @@ Java_lt_smworks_multiplatform3dengine_vulkan_EngineAPI_nativeResize(JNIEnv* env,
 
 JNIEXPORT void JNICALL
 Java_lt_smworks_multiplatform3dengine_vulkan_EngineAPI_nativeLoadModel(JNIEnv* env, jobject thiz, jfloat x, jfloat y, jfloat z) {
-	if (!g.initialized) return;
-	vkDeviceWaitIdle(g.device);
-	destroyModelBuffers();
-	uploadModelBuffers(static_cast<float>(x), static_cast<float>(y), static_cast<float>(z));
-	g.modelLoaded = true;
+	Model newModel = loadModel();
+	newModel.setPosition(static_cast<float>(x), static_cast<float>(y), static_cast<float>(z));
+
+	if (!newModel.hasGeometry()) {
+		return;
+	}
+
+	GpuModel gpuModel;
+	gpuModel.cpu = std::move(newModel);
+
+	if (g.initialized) {
+		vkDeviceWaitIdle(g.device);
+		uploadGpuBuffers(gpuModel);
+	}
+
+	g.models.push_back(std::move(gpuModel));
 }
 
 JNIEXPORT void JNICALL
@@ -371,7 +406,11 @@ Java_lt_smworks_multiplatform3dengine_vulkan_EngineAPI_nativeRender(JNIEnv* env,
 	// Apply camera viewport/scissor
 	g.camera.applyToCommandBuffer(g.commandBuffers[imageIndex]);
 	vkCmdBindPipeline(g.commandBuffers[imageIndex], VK_PIPELINE_BIND_POINT_GRAPHICS, g.graphicsPipeline);
-	if (g.indexCount > 0 && g.vertexBuffer && g.indexBuffer) {
+	for (const auto& model : g.models) {
+		if (!model.cpu.hasGeometry() || !model.vertexBuffer || !model.indexBuffer) {
+			continue;
+		}
+
 		float pushConstants[9] = {
 			g.camera.getYaw(),
 			g.camera.getPitch(),
@@ -379,16 +418,17 @@ Java_lt_smworks_multiplatform3dengine_vulkan_EngineAPI_nativeRender(JNIEnv* env,
 			g.camera.getWidth(),
 			g.camera.getHeight(),
 			g.camera.getDistance(),
-			g.modelOffset[0],
-			g.modelOffset[1],
-			g.modelOffset[2]
+			model.cpu.position[0],
+			model.cpu.position[1],
+			model.cpu.position[2]
 		};
 		vkCmdPushConstants(g.commandBuffers[imageIndex], g.pipelineLayout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(pushConstants), pushConstants);
-		
+
 		VkDeviceSize offsets[] = {0};
-		vkCmdBindVertexBuffers(g.commandBuffers[imageIndex], 0, 1, &g.vertexBuffer, offsets);
-		vkCmdBindIndexBuffer(g.commandBuffers[imageIndex], g.indexBuffer, 0, VK_INDEX_TYPE_UINT16);
-		vkCmdDrawIndexed(g.commandBuffers[imageIndex], g.indexCount, 1, 0, 0, 0);
+		VkBuffer vertexBuffer = model.vertexBuffer;
+		vkCmdBindVertexBuffers(g.commandBuffers[imageIndex], 0, 1, &vertexBuffer, offsets);
+		vkCmdBindIndexBuffer(g.commandBuffers[imageIndex], model.indexBuffer, 0, VK_INDEX_TYPE_UINT16);
+		vkCmdDrawIndexed(g.commandBuffers[imageIndex], static_cast<uint32_t>(model.cpu.indexCount()), 1, 0, 0, 0);
 	}
 	vkCmdEndRenderPass(g.commandBuffers[imageIndex]);
 	check(vkEndCommandBuffer(g.commandBuffers[imageIndex]), "vkEndCommandBuffer");
@@ -447,7 +487,6 @@ Java_lt_smworks_multiplatform3dengine_vulkan_EngineAPI_nativeRotateCamera(JNIEnv
 	if (yaw != 0.0f) g.camera.rotateYaw(static_cast<float>(yaw));
 	if (pitch != 0.0f) g.camera.rotatePitch(static_cast<float>(pitch));
 	if (roll != 0.0f) g.camera.rotateRoll(static_cast<float>(roll));
-	LOGI("Camera rotated: yaw=%.3f pitch=%.3f roll=%.3f", g.camera.getYaw(), g.camera.getPitch(), g.camera.getRoll());
 }
 
 
