@@ -93,7 +93,7 @@ actual fun VulkanScreen(
                                 val absDeltaY = abs(deltaY)
 
                                 if (absDeltaX > 1f || absDeltaY > 1f) {
-                                    renderer.rotateCamera(-deltaX * sensitivity, deltaY * sensitivity, 0f)
+                                    renderer.rotateCamera(-deltaX * sensitivity, -deltaY * sensitivity, 0f)
                                 }
                             }
                             true
