@@ -30,6 +30,10 @@ actual fun VulkanScreen(
         modifier = modifier,
         factory = { context ->
             SurfaceView(context).apply {
+                var lastTouchX = 0f
+                var lastTouchY = 0f
+                var activePointerId = MotionEvent.INVALID_POINTER_ID
+
                 holder.addCallback(object : SurfaceHolder.Callback {
                     override fun surfaceCreated(holder: SurfaceHolder) {
                         val surface = holder.surface
@@ -48,14 +52,39 @@ actual fun VulkanScreen(
                 })
 
                 setOnTouchListener { _, event ->
-                    when (event.action) {
+                    when (event.actionMasked) {
                         MotionEvent.ACTION_DOWN -> {
+                            activePointerId = event.getPointerId(0)
+                            lastTouchX = event.x
+                            lastTouchY = event.y
+                            true
+                        }
+
+                        MotionEvent.ACTION_POINTER_DOWN -> {
+                            val index = event.actionIndex
+                            activePointerId = event.getPointerId(index)
+                            lastTouchX = event.getX(index)
+                            lastTouchY = event.getY(index)
                             true
                         }
 
                         MotionEvent.ACTION_MOVE -> {
-                            val deltaX = event.x
-                            val deltaY = event.y
+                            if (activePointerId == MotionEvent.INVALID_POINTER_ID) {
+                                return@setOnTouchListener false
+                            }
+
+                            val pointerIndex = event.findPointerIndex(activePointerId)
+                            if (pointerIndex == -1) {
+                                return@setOnTouchListener false
+                            }
+
+                            val currentX = event.getX(pointerIndex)
+                            val currentY = event.getY(pointerIndex)
+                            val deltaX = currentX - lastTouchX
+                            val deltaY = currentY - lastTouchY
+
+                            lastTouchX = currentX
+                            lastTouchY = currentY
 
                             val sensitivity = 0.002f // radians per pixel
 
@@ -64,21 +93,30 @@ actual fun VulkanScreen(
                                 val absDeltaY = abs(deltaY)
 
                                 if (absDeltaX > 1f || absDeltaY > 1f) {
-                                    when {
-                                        absDeltaX > absDeltaY -> {
-                                            renderer.rotateCamera(-deltaX * sensitivity, 0f, 0f)
-                                        }
-
-                                        else -> {
-                                            renderer.rotateCamera(0f, deltaY * sensitivity, 0f)
-                                        }
-                                    }
+                                    renderer.rotateCamera(-deltaX * sensitivity, deltaY * sensitivity, 0f)
                                 }
                             }
                             true
                         }
 
                         MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                            activePointerId = MotionEvent.INVALID_POINTER_ID
+                            true
+                        }
+
+                        MotionEvent.ACTION_POINTER_UP -> {
+                            val pointerIndex = event.actionIndex
+                            val pointerId = event.getPointerId(pointerIndex)
+                            if (pointerId == activePointerId) {
+                                val newIndex = if (pointerIndex == 0) 1 else 0
+                                if (newIndex < event.pointerCount) {
+                                    activePointerId = event.getPointerId(newIndex)
+                                    lastTouchX = event.getX(newIndex)
+                                    lastTouchY = event.getY(newIndex)
+                                } else {
+                                    activePointerId = MotionEvent.INVALID_POINTER_ID
+                                }
+                            }
                             true
                         }
 
