@@ -1,6 +1,7 @@
 #pragma once
 
 #include <vulkan/vulkan.h>
+#include <cmath>
 
 // Camera class encapsulates viewport and scissor configuration for rendering.
 class Camera {
@@ -19,8 +20,28 @@ public:
 	// Apply viewport and scissor to a command buffer
 	void applyToCommandBuffer(VkCommandBuffer commandBuffer) const;
 
+	// Rotation methods
+	void rotateYaw(float angle);      // Rotate around Y axis (horizontal rotation)
+	void rotatePitch(float angle);    // Rotate around X axis (vertical rotation)
+	void rotateRoll(float angle);     // Rotate around Z axis (roll rotation)
+	
+	// Get rotation angles (in radians)
+	float getYaw() const { return yaw; }
+	float getPitch() const { return pitch; }
+	float getRoll() const { return roll; }
+	
+	// Set rotation angles directly (in radians)
+	void setYaw(float angle) { yaw = angle; }
+	void setPitch(float angle) { pitch = angle; }
+	void setRoll(float angle) { roll = angle; }
+
 private:
 	VkViewport viewport{};
 	VkRect2D scissor{};
+	
+	// Rotation angles in radians
+	float yaw = 0.0f;    // Rotation around Y axis
+	float pitch = 0.0f;  // Rotation around X axis
+	float roll = 0.0f;   // Rotation around Z axis
 };
 

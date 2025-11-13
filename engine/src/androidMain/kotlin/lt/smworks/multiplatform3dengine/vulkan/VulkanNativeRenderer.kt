@@ -35,6 +35,15 @@ class VulkanNativeRenderer {
 		nativeResize(width, height)
 	}
 
+	fun rotateCamera(yaw: Float, pitch: Float, roll: Float) {
+		nativeRotateCamera(yaw, pitch, roll)
+	}
+
+	fun setupForGestures() {
+		// Store this renderer instance for gesture handling
+		setCurrentRendererForGestures(this)
+	}
+
 	fun destroy() {
 		stop()
 		nativeDestroy()
@@ -43,6 +52,7 @@ class VulkanNativeRenderer {
 	private external fun nativeInit(surface: Surface, assetManager: AssetManager)
 	private external fun nativeResize(width: Int, height: Int)
 	private external fun nativeRender()
+	private external fun nativeRotateCamera(yaw: Float, pitch: Float, roll: Float)
 	private external fun nativeDestroy()
 }
 

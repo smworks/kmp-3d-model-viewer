@@ -190,6 +190,15 @@ static void recordCommandBuffers() {
 		// Apply camera viewport/scissor and draw
 		g.camera.applyToCommandBuffer(g.commandBuffers[i]);
 		vkCmdBindPipeline(g.commandBuffers[i], VK_PIPELINE_BIND_POINT_GRAPHICS, g.graphicsPipeline);
+		
+		// Push camera rotation constants
+		float rotationData[3] = {
+			g.camera.getYaw(),
+			g.camera.getPitch(),
+			g.camera.getRoll()
+		};
+		vkCmdPushConstants(g.commandBuffers[i], g.pipelineLayout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(rotationData), rotationData);
+		
 		VkDeviceSize offsets[] = {0};
 		vkCmdBindVertexBuffers(g.commandBuffers[i], 0, 1, &g.vertexBuffer, offsets);
 		vkCmdBindIndexBuffer(g.commandBuffers[i], g.indexBuffer, 0, VK_INDEX_TYPE_UINT16);
@@ -306,6 +315,48 @@ Java_lt_smworks_multiplatform3dengine_vulkan_VulkanNativeRenderer_nativeRender(J
 	}
 	check(acq, "vkAcquireNextImageKHR");
 
+	// Reset and record command buffer with current camera rotation
+	check(vkResetCommandBuffer(g.commandBuffers[imageIndex], 0), "vkResetCommandBuffer");
+	VkCommandBufferBeginInfo bi{};
+	bi.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+	check(vkBeginCommandBuffer(g.commandBuffers[imageIndex], &bi), "vkBeginCommandBuffer");
+
+	VkClearValue clear{};
+	clear.color = { {0.1f, 0.2f, 0.3f, 1.0f} };
+	VkRenderPassBeginInfo rpbi{};
+	rpbi.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
+	rpbi.renderPass = g.renderPass;
+	rpbi.framebuffer = g.framebuffers[imageIndex];
+	rpbi.renderArea.offset = {0,0};
+	rpbi.renderArea.extent = g.swapchainExtent;
+	rpbi.clearValueCount = 1;
+	rpbi.pClearValues = &clear;
+	vkCmdBeginRenderPass(g.commandBuffers[imageIndex], &rpbi, VK_SUBPASS_CONTENTS_INLINE);
+	
+	// Apply camera viewport/scissor
+	g.camera.applyToCommandBuffer(g.commandBuffers[imageIndex]);
+	vkCmdBindPipeline(g.commandBuffers[imageIndex], VK_PIPELINE_BIND_POINT_GRAPHICS, g.graphicsPipeline);
+	
+	// Push current camera rotation constants
+	float rotationData[3] = {
+		g.camera.getYaw(),
+		g.camera.getPitch(),
+		g.camera.getRoll()
+	};
+	vkCmdPushConstants(g.commandBuffers[imageIndex], g.pipelineLayout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(rotationData), rotationData);
+	
+	// Debug: log rotation values occasionally (every 60 frames)
+	if (g.currentFrame % 60 == 0) {
+		LOGI("Pushing rotation: yaw=%.3f pitch=%.3f roll=%.3f", rotationData[0], rotationData[1], rotationData[2]);
+	}
+	
+	VkDeviceSize offsets[] = {0};
+	vkCmdBindVertexBuffers(g.commandBuffers[imageIndex], 0, 1, &g.vertexBuffer, offsets);
+	vkCmdBindIndexBuffer(g.commandBuffers[imageIndex], g.indexBuffer, 0, VK_INDEX_TYPE_UINT16);
+	vkCmdDrawIndexed(g.commandBuffers[imageIndex], g.indexCount, 1, 0, 0, 0);
+	vkCmdEndRenderPass(g.commandBuffers[imageIndex]);
+	check(vkEndCommandBuffer(g.commandBuffers[imageIndex]), "vkEndCommandBuffer");
+
 	VkPipelineStageFlags waitStage = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
 	VkSubmitInfo submit{};
 	submit.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
@@ -352,6 +403,15 @@ Java_lt_smworks_multiplatform3dengine_vulkan_VulkanNativeRenderer_nativeDestroy(
 	if (g.builder) { delete g.builder; g.builder = nullptr; }
 	g = VulkanState{};
 	LOGI("Vulkan destroyed");
+}
+
+JNIEXPORT void JNICALL
+Java_lt_smworks_multiplatform3dengine_vulkan_VulkanNativeRenderer_nativeRotateCamera(JNIEnv* env, jobject thiz, jfloat yaw, jfloat pitch, jfloat roll) {
+	if (!g.initialized) return;
+	if (yaw != 0.0f) g.camera.rotateYaw(static_cast<float>(yaw));
+	if (pitch != 0.0f) g.camera.rotatePitch(static_cast<float>(pitch));
+	if (roll != 0.0f) g.camera.rotateRoll(static_cast<float>(roll));
+	LOGI("Camera rotated: yaw=%.3f pitch=%.3f roll=%.3f", g.camera.getYaw(), g.camera.getPitch(), g.camera.getRoll());
 }
 
 

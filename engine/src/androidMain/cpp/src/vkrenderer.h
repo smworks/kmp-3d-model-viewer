@@ -20,6 +20,9 @@ Java_lt_smworks_multiplatform3dengine_vulkan_VulkanNativeRenderer_nativeRender(J
 JNIEXPORT void JNICALL
 Java_lt_smworks_multiplatform3dengine_vulkan_VulkanNativeRenderer_nativeDestroy(JNIEnv* env, jobject thiz);
 
+JNIEXPORT void JNICALL
+Java_lt_smworks_multiplatform3dengine_vulkan_VulkanNativeRenderer_nativeRotateCamera(JNIEnv* env, jobject thiz, jfloat yaw, jfloat pitch, jfloat roll);
+
 #ifdef __cplusplus
 }
 #endif

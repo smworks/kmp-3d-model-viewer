@@ -42,6 +42,9 @@ fun AndroidSample() {
 			}
 		}
 		if (supported) {
+			// Setup renderer for gesture handling
+			renderer.setupForGestures()
+			
 			VulkanScreen(
 				modifier = Modifier.fillMaxSize(),
 				onCreate = { surface ->
