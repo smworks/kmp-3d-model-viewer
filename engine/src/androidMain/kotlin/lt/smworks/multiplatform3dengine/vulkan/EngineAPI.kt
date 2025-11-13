@@ -7,6 +7,14 @@ import java.util.concurrent.atomic.AtomicBoolean
 actual class EngineAPI actual constructor() {
     private val running = AtomicBoolean(false)
     private var thread: Thread? = null
+    private var isNativeReady = false
+
+    private data class ModelState(val x: Float, val y: Float, val z: Float)
+    private val modelStates = mutableListOf<ModelState>()
+    private var accumulatedCameraDistance = 0f
+    private var accumulatedYaw = 0f
+    private var accumulatedPitch = 0f
+    private var accumulatedRoll = 0f
 
     init {
         System.loadLibrary("vkrenderer")
@@ -14,6 +22,8 @@ actual class EngineAPI actual constructor() {
 
     fun init(surface: Surface, assetManager: AssetManager) {
         nativeInit(surface, assetManager)
+        isNativeReady = true
+        restoreSceneState()
     }
 
     fun start() {
@@ -36,15 +46,26 @@ actual class EngineAPI actual constructor() {
     }
 
     fun rotateCamera(yaw: Float, pitch: Float, roll: Float) {
-        nativeRotateCamera(yaw, pitch, roll)
+        accumulatedYaw += yaw
+        accumulatedPitch += pitch
+        accumulatedRoll += roll
+        if (isNativeReady) {
+            nativeRotateCamera(yaw, pitch, roll)
+        }
     }
 
     actual fun loadModel(x: Float, y: Float, z: Float) {
-        nativeLoadModel(x, y, z)
+        modelStates.add(ModelState(x, y, z))
+        if (isNativeReady) {
+            nativeLoadModel(x, y, z)
+        }
     }
 
     actual fun moveCamera(delta: Float) {
-        nativeMoveCamera(delta)
+        accumulatedCameraDistance += delta
+        if (isNativeReady) {
+            nativeMoveCamera(delta)
+        }
     }
 
     fun setupForGestures() {
@@ -55,6 +76,19 @@ actual class EngineAPI actual constructor() {
     fun destroy() {
         stop()
         nativeDestroy()
+        isNativeReady = false
+    }
+
+    private fun restoreSceneState() {
+        modelStates.forEach { state ->
+            nativeLoadModel(state.x, state.y, state.z)
+        }
+        if (accumulatedCameraDistance != 0f) {
+            nativeMoveCamera(accumulatedCameraDistance)
+        }
+        if (accumulatedYaw != 0f || accumulatedPitch != 0f || accumulatedRoll != 0f) {
+            nativeRotateCamera(accumulatedYaw, accumulatedPitch, accumulatedRoll)
+        }
     }
 
     private external fun nativeInit(surface: Surface, assetManager: AssetManager)
