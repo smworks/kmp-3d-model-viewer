@@ -32,17 +32,20 @@ mat4 rotationMatrix(vec3 axis, float angle) {
 }
 
 void main() {
-	// Apply rotations: first yaw (Y-axis), then pitch (X-axis), then roll (Z-axis)
+	// Camera rotations: yaw (Y-axis), then pitch (X-axis), then roll (Z-axis)
 	mat4 rotY = rotationMatrix(vec3(0.0, 1.0, 0.0), pc.yaw);
 	mat4 rotX = rotationMatrix(vec3(1.0, 0.0, 0.0), pc.pitch);
 	mat4 rotZ = rotationMatrix(vec3(0.0, 0.0, 1.0), pc.roll);
-	
-	mat4 rotation = rotZ * rotX * rotY;
-	vec4 worldPos = rotation * vec4(inPos, 1.0);
-	worldPos.xyz += vec3(pc.modelX, pc.modelY, pc.modelZ);
-	
-	// Simple view transform: move the model along the camera's forward axis (negative Z)
-	vec4 viewPos = worldPos + vec4(0.0, 0.0, pc.distance, 0.0);
+	mat4 cameraRotation = rotZ * rotX * rotY;
+	mat4 viewRotation = transpose(cameraRotation); // inverse for orthonormal rotation matrix
+
+	// Model position in world space
+	vec4 worldPos = vec4(inPos + vec3(pc.modelX, pc.modelY, pc.modelZ), 1.0);
+
+	// Camera positioned along negative Z axis by distance
+	vec3 cameraPos = vec3(0.0, 0.0, -pc.distance);
+	vec4 viewPos = vec4(worldPos.xyz - cameraPos, 1.0);
+	viewPos = viewRotation * viewPos;
 	
 	// Perspective projection using vertical FOV of 60 degrees
 	float aspect = pc.width > 0.0 ? pc.width / pc.height : 1.0;
@@ -53,7 +56,7 @@ void main() {
 	
 	mat4 proj = mat4(
 		vec4(f / aspect, 0.0, 0.0, 0.0),
-		vec4(0.0, f, 0.0, 0.0),
+		vec4(0.0, -f, 0.0, 0.0), // Vulkan NDC has inverted Y
 		vec4(0.0, 0.0, -(farPlane + nearPlane) / (farPlane - nearPlane), -1.0),
 		vec4(0.0, 0.0, -(2.0 * farPlane * nearPlane) / (farPlane - nearPlane), 0.0)
 	);

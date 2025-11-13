@@ -86,7 +86,7 @@ actual fun VulkanScreen(
                             lastTouchX = currentX
                             lastTouchY = currentY
 
-                            val sensitivity = 0.002f // radians per pixel
+                            val sensitivity = 0.001f // radians per pixel
 
                             currentRenderer?.let { renderer ->
                                 val absDeltaX = abs(deltaX)

@@ -23,38 +23,38 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
 
         setContent {
-			AndroidSample()
+            AndroidSample()
         }
     }
 }
 
 @Composable
 fun AndroidSample() {
-	MaterialTheme {
-		val context = LocalContext.current
-		val supported = remember { VulkanSupport.isSupported(context) }
+    MaterialTheme {
+        val context = LocalContext.current
+        val supported = remember { VulkanSupport.isSupported(context) }
 
 
-		if (supported) {
-			val engine = rememberEngineApi()
+        if (supported) {
+            val engine = rememberEngineApi()
             LaunchedEffect(Unit) {
                 engine.moveCamera(-20.1f)
-				engine.loadModel(5f, 0f, 0f)
+                engine.loadModel(5f, 0f, 0f)
                 engine.loadModel(0f, 0f, 0f)
             }
 
-			VulkanScreen(
-				modifier = Modifier.fillMaxSize(),
-				engine = engine
-			)
-		} else {
-			Text("Vulkan not supported on this device/emulator")
-		}
-	}
+            VulkanScreen(
+                modifier = Modifier.fillMaxSize(),
+                engine = engine
+            )
+        } else {
+            Text("Vulkan not supported on this device/emulator")
+        }
+    }
 }
 
 @Preview
 @Composable
 fun VulkanScreenAndroidPreview() {
-	AndroidSample()
+    AndroidSample()
 }
