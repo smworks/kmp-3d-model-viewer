@@ -50,6 +50,10 @@ add_library(vkrenderer SHARED
 	src/Camera.cpp
 	src/Camera.h
 	src/Model.h
+	src/ModelLoader.cpp
+	src/ModelLoader.h
+	src/ImageLoader.cpp
+	src/ImageLoader.h
 )
 
 find_library(log-lib log)

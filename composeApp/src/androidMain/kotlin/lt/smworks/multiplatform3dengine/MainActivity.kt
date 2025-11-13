@@ -39,8 +39,9 @@ fun AndroidSample() {
             val engine = rememberEngineApi()
             LaunchedEffect(Unit) {
                 engine.moveCamera(-20.1f)
-                engine.loadModel(5f, 0f, 0f)
-                engine.loadModel(0f, 0f, 0f)
+                val modelPath = "models/untitled.obj"
+                engine.loadModel(modelPath, 5f, 0f, 0f)
+                engine.loadModel(modelPath, 0f, 0f, 0f)
             }
 
             VulkanScreen(

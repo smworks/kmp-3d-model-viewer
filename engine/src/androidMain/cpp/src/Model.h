@@ -2,11 +2,28 @@
 
 #include <vector>
 #include <cstdint>
+#include <string>
+#include <array>
 
-// Simple 3D model container for geometry data and transform.
+struct Material {
+	std::string name;
+	std::array<float, 3> diffuseColor{ 1.0f, 1.0f, 1.0f };
+	std::string diffuseTexture; // Relative path inside assets folder
+};
+
+// Simple 3D model container for geometry, materials and transform.
 struct Model {
-	std::vector<float> positions;   // xyz sequence
-	std::vector<uint16_t> indices;  // triangle indices
+	std::vector<float> positions;        // xyz sequence
+	std::vector<float> normals;          // xyz sequence
+	std::vector<float> texcoords;        // uv sequence
+	std::vector<uint32_t> indices;       // triangle indices
+	std::vector<Material> materials;
+	struct Subset {
+		uint32_t indexOffset = 0;   // Index into indices vector
+		uint32_t indexCount = 0;    // Count of indices for this subset
+		uint16_t materialIndex = 0; // Index into materials vector
+	};
+	std::vector<Subset> subsets;
 	float position[3] = { 0.0f, 0.0f, 0.0f }; // model translation
 
 	void setPosition(float x, float y, float z) {
@@ -23,8 +40,20 @@ struct Model {
 		return indices.size();
 	}
 
+	size_t triangleCount() const {
+		return indices.size() / 3;
+	}
+
 	bool hasGeometry() const {
 		return !positions.empty() && !indices.empty();
+	}
+
+	bool hasNormals() const {
+		return !normals.empty();
+	}
+
+	bool hasTexcoords() const {
+		return !texcoords.empty();
 	}
 };
 
@@ -38,7 +67,7 @@ static inline Model createCubeModel() {
 	};
 	m.positions.assign(verts, verts + 8 * 3);
 
-	const uint16_t idx[] = {
+	const uint32_t idx[] = {
 		0, 1, 2,  2, 3, 0,       // back
 		4, 6, 5,  6, 4, 7,       // front
 		0, 3, 7,  7, 4, 0,       // left
@@ -47,6 +76,14 @@ static inline Model createCubeModel() {
 		0, 4, 5,  5, 1, 0        // bottom
 	};
 	m.indices.assign(idx, idx + 36);
+	Material mat;
+	mat.name = "Default";
+	m.materials.push_back(mat);
+	Model::Subset subset;
+	subset.indexOffset = 0;
+	subset.indexCount = static_cast<uint32_t>(m.indices.size());
+	subset.materialIndex = 0;
+	m.subsets.push_back(subset);
 	return m;
 }
 

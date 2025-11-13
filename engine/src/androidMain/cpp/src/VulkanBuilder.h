@@ -23,6 +23,7 @@ public:
 	// Provide SPIR-V code for pipeline creation
 	VulkanBuilder& setVertexSpirv(const std::vector<uint32_t>& vert);
 	VulkanBuilder& setFragmentSpirv(const std::vector<uint32_t>& frag);
+	VulkanBuilder& setDescriptorSetLayouts(const std::vector<VkDescriptorSetLayout>& layouts);
 
 	// Swapchain dependent cleanup (does not destroy device/instance/surface)
 	void cleanupSwapchain();
@@ -68,6 +69,7 @@ private:
 
 	std::vector<uint32_t> vertSpv;
 	std::vector<uint32_t> fragSpv;
+	std::vector<VkDescriptorSetLayout> descriptorSetLayouts;
 };
 
 

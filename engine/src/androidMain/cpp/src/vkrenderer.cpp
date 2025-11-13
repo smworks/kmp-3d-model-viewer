@@ -8,6 +8,18 @@
 #include <vector>
 #include <cstring>
 #include <utility>
+#include <string>
+#include <unordered_map>
+#include <algorithm>
+#include <array>
+#include <cstdio>
+#include <limits>
+#include <cstddef>
+#include <mutex>
+
+#include "ImageLoader.h"
+
+static constexpr size_t INVALID_TEXTURE_INDEX = std::numeric_limits<size_t>::max();
 #include "ModelLoader.h"
 #include "VulkanBuilder.h"
 #include "Camera.h"
@@ -22,6 +34,18 @@ struct GpuModel {
 	VkDeviceMemory vertexMemory = VK_NULL_HANDLE;
 	VkBuffer indexBuffer = VK_NULL_HANDLE;
 	VkDeviceMemory indexMemory = VK_NULL_HANDLE;
+	std::vector<size_t> materialTextureIndices;
+};
+
+struct TextureResource {
+	std::string key;
+	VkImage image = VK_NULL_HANDLE;
+	VkDeviceMemory memory = VK_NULL_HANDLE;
+	VkImageView view = VK_NULL_HANDLE;
+	VkSampler sampler = VK_NULL_HANDLE;
+	VkDescriptorSet descriptorSet = VK_NULL_HANDLE;
+	uint32_t width = 0;
+	uint32_t height = 0;
 };
 
 struct VulkanState {
@@ -52,9 +76,20 @@ struct VulkanState {
 	bool initialized = false;
 	Camera camera;
 	std::vector<GpuModel> models;
+	VkDescriptorSetLayout textureDescriptorSetLayout = VK_NULL_HANDLE;
+	VkDescriptorPool textureDescriptorPool = VK_NULL_HANDLE;
+	VkCommandPool uploadCommandPool = VK_NULL_HANDLE;
+	std::vector<TextureResource> textures;
+	std::unordered_map<std::string, size_t> textureCache;
+	size_t defaultTextureIndex = INVALID_TEXTURE_INDEX;
 };
 
 static VulkanState g;
+static std::mutex g_stateMutex;
+
+JavaVM* g_javaVm = nullptr;
+jclass g_engineApiClass = nullptr;
+jmethodID g_decodeTextureMethod = nullptr;
 
 static void check(VkResult r, const char* what) {
 	if (r != VK_SUCCESS) {
@@ -94,6 +129,373 @@ static void createBuffer(VkDeviceSize size, VkBufferUsageFlags usage, VkMemoryPr
 	check(vkBindBufferMemory(g.device, buffer, memory, 0), "vkBindBufferMemory");
 }
 
+static void createImage(uint32_t width, uint32_t height, VkFormat format, VkImageUsageFlags usage, VkImage& image, VkDeviceMemory& memory) {
+	VkImageCreateInfo ici{};
+	ici.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
+	ici.imageType = VK_IMAGE_TYPE_2D;
+	ici.extent.width = width;
+	ici.extent.height = height;
+	ici.extent.depth = 1;
+	ici.mipLevels = 1;
+	ici.arrayLayers = 1;
+	ici.format = format;
+	ici.tiling = VK_IMAGE_TILING_OPTIMAL;
+	ici.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+	ici.usage = usage;
+	ici.samples = VK_SAMPLE_COUNT_1_BIT;
+	ici.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+	check(vkCreateImage(g.device, &ici, nullptr, &image), "vkCreateImage");
+
+	VkMemoryRequirements memReq{};
+	vkGetImageMemoryRequirements(g.device, image, &memReq);
+
+	VkMemoryAllocateInfo alloc{};
+	alloc.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+	alloc.allocationSize = memReq.size;
+	alloc.memoryTypeIndex = findMemoryType(memReq.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+	check(vkAllocateMemory(g.device, &alloc, nullptr, &memory), "vkAllocateMemory(image)");
+	check(vkBindImageMemory(g.device, image, memory, 0), "vkBindImageMemory");
+}
+
+static VkImageView createImageView(VkImage image, VkFormat format) {
+	VkImageViewCreateInfo viewInfo{};
+	viewInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+	viewInfo.image = image;
+	viewInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
+	viewInfo.format = format;
+	viewInfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+	viewInfo.subresourceRange.baseMipLevel = 0;
+	viewInfo.subresourceRange.levelCount = 1;
+	viewInfo.subresourceRange.baseArrayLayer = 0;
+	viewInfo.subresourceRange.layerCount = 1;
+	VkImageView imageView = VK_NULL_HANDLE;
+	check(vkCreateImageView(g.device, &viewInfo, nullptr, &imageView), "vkCreateImageView(texture)");
+	return imageView;
+}
+
+static VkSampler createSampler() {
+	VkSamplerCreateInfo samplerInfo{};
+	samplerInfo.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
+	samplerInfo.magFilter = VK_FILTER_LINEAR;
+	samplerInfo.minFilter = VK_FILTER_LINEAR;
+	samplerInfo.addressModeU = VK_SAMPLER_ADDRESS_MODE_REPEAT;
+	samplerInfo.addressModeV = VK_SAMPLER_ADDRESS_MODE_REPEAT;
+	samplerInfo.addressModeW = VK_SAMPLER_ADDRESS_MODE_REPEAT;
+	samplerInfo.anisotropyEnable = VK_FALSE;
+	samplerInfo.maxAnisotropy = 1.0f;
+	samplerInfo.borderColor = VK_BORDER_COLOR_INT_OPAQUE_BLACK;
+	samplerInfo.unnormalizedCoordinates = VK_FALSE;
+	samplerInfo.compareEnable = VK_FALSE;
+	samplerInfo.compareOp = VK_COMPARE_OP_ALWAYS;
+	samplerInfo.mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR;
+	samplerInfo.mipLodBias = 0.0f;
+	samplerInfo.minLod = 0.0f;
+	samplerInfo.maxLod = 0.0f;
+	VkSampler sampler = VK_NULL_HANDLE;
+	check(vkCreateSampler(g.device, &samplerInfo, nullptr, &sampler), "vkCreateSampler");
+	return sampler;
+}
+
+static VkCommandBuffer beginSingleTimeCommands() {
+	if (!g.device || !g.uploadCommandPool) return VK_NULL_HANDLE;
+	VkCommandBufferAllocateInfo alloc{};
+	alloc.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+	alloc.commandPool = g.uploadCommandPool;
+	alloc.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+	alloc.commandBufferCount = 1;
+	VkCommandBuffer cmd = VK_NULL_HANDLE;
+	check(vkAllocateCommandBuffers(g.device, &alloc, &cmd), "vkAllocateCommandBuffers(single)");
+
+	VkCommandBufferBeginInfo begin{};
+	begin.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+	begin.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+	check(vkBeginCommandBuffer(cmd, &begin), "vkBeginCommandBuffer(single)");
+	return cmd;
+}
+
+static void endSingleTimeCommands(VkCommandBuffer cmd) {
+	if (!cmd) return;
+	check(vkEndCommandBuffer(cmd), "vkEndCommandBuffer(single)");
+	VkSubmitInfo submit{};
+	submit.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+	submit.commandBufferCount = 1;
+	submit.pCommandBuffers = &cmd;
+	VkResult submitResult = vkQueueSubmit(g.graphicsQueue, 1, &submit, VK_NULL_HANDLE);
+	if (submitResult == VK_ERROR_DEVICE_LOST) {
+		LOGE("vkQueueSubmit(single) reported VK_ERROR_DEVICE_LOST");
+		vkFreeCommandBuffers(g.device, g.uploadCommandPool, 1, &cmd);
+		return;
+	}
+	check(submitResult, "vkQueueSubmit(single)");
+	check(vkQueueWaitIdle(g.graphicsQueue), "vkQueueWaitIdle(single)");
+	vkFreeCommandBuffers(g.device, g.uploadCommandPool, 1, &cmd);
+}
+
+static void transitionImageLayout(VkImage image, VkFormat format, VkImageLayout oldLayout, VkImageLayout newLayout) {
+	(void)format;
+	VkCommandBuffer cmd = beginSingleTimeCommands();
+	if (!cmd) return;
+
+	VkImageMemoryBarrier barrier{};
+	barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+	barrier.oldLayout = oldLayout;
+	barrier.newLayout = newLayout;
+	barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+	barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+	barrier.image = image;
+	barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+	barrier.subresourceRange.baseMipLevel = 0;
+	barrier.subresourceRange.levelCount = 1;
+	barrier.subresourceRange.baseArrayLayer = 0;
+	barrier.subresourceRange.layerCount = 1;
+
+	VkPipelineStageFlags sourceStage = VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT;
+	VkPipelineStageFlags destinationStage = VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
+
+	if (oldLayout == VK_IMAGE_LAYOUT_UNDEFINED && newLayout == VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL) {
+		barrier.srcAccessMask = 0;
+		barrier.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+		sourceStage = VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT;
+		destinationStage = VK_PIPELINE_STAGE_TRANSFER_BIT;
+	} else if (oldLayout == VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL && newLayout == VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL) {
+		barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+		barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+		sourceStage = VK_PIPELINE_STAGE_TRANSFER_BIT;
+		destinationStage = VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
+	} else {
+		LOGE("Unsupported image layout transition");
+	}
+
+	vkCmdPipelineBarrier(
+		cmd,
+		sourceStage,
+		destinationStage,
+		0,
+		0, nullptr,
+		0, nullptr,
+		1, &barrier);
+
+	endSingleTimeCommands(cmd);
+}
+
+static void copyBufferToImage(VkBuffer buffer, VkImage image, uint32_t width, uint32_t height) {
+	VkCommandBuffer cmd = beginSingleTimeCommands();
+	if (!cmd) return;
+
+	VkBufferImageCopy region{};
+	region.bufferOffset = 0;
+	region.bufferRowLength = 0;
+	region.bufferImageHeight = 0;
+	region.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+	region.imageSubresource.mipLevel = 0;
+	region.imageSubresource.baseArrayLayer = 0;
+	region.imageSubresource.layerCount = 1;
+	region.imageOffset = {0, 0, 0};
+	region.imageExtent = {width, height, 1};
+
+	vkCmdCopyBufferToImage(
+		cmd,
+		buffer,
+		image,
+		VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+		1,
+		&region);
+
+	endSingleTimeCommands(cmd);
+}
+
+static void createUploadCommandPoolIfNeeded() {
+	if (g.uploadCommandPool || !g.device) return;
+	VkCommandPoolCreateInfo info{};
+	info.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
+	info.queueFamilyIndex = g.graphicsQueueFamily;
+	info.flags = VK_COMMAND_POOL_CREATE_TRANSIENT_BIT | VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
+	check(vkCreateCommandPool(g.device, &info, nullptr, &g.uploadCommandPool), "vkCreateCommandPool(upload)");
+}
+
+static void createTextureDescriptorSetLayoutIfNeeded() {
+	if (g.textureDescriptorSetLayout || !g.device) return;
+	VkDescriptorSetLayoutBinding binding{};
+	binding.binding = 0;
+	binding.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+	binding.descriptorCount = 1;
+	binding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+	binding.pImmutableSamplers = nullptr;
+
+	VkDescriptorSetLayoutCreateInfo info{};
+	info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+	info.bindingCount = 1;
+	info.pBindings = &binding;
+	check(vkCreateDescriptorSetLayout(g.device, &info, nullptr, &g.textureDescriptorSetLayout), "vkCreateDescriptorSetLayout(texture)");
+}
+
+static void createTextureDescriptorPoolIfNeeded() {
+	if (g.textureDescriptorPool || !g.device) return;
+	const uint32_t maxTextures = 256;
+	VkDescriptorPoolSize poolSize{};
+	poolSize.type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+	poolSize.descriptorCount = maxTextures;
+
+	VkDescriptorPoolCreateInfo info{};
+	info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
+	info.poolSizeCount = 1;
+	info.pPoolSizes = &poolSize;
+	info.maxSets = maxTextures;
+	info.flags = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT;
+	check(vkCreateDescriptorPool(g.device, &info, nullptr, &g.textureDescriptorPool), "vkCreateDescriptorPool(texture)");
+}
+
+static size_t createTextureFromPixels(const std::string& key, uint32_t width, uint32_t height, const unsigned char* pixels, size_t size) {
+	createUploadCommandPoolIfNeeded();
+	createTextureDescriptorSetLayoutIfNeeded();
+	createTextureDescriptorPoolIfNeeded();
+	if (!g.device) return INVALID_TEXTURE_INDEX;
+
+	VkBuffer stagingBuffer = VK_NULL_HANDLE;
+	VkDeviceMemory stagingMemory = VK_NULL_HANDLE;
+	createBuffer(static_cast<VkDeviceSize>(size), VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+		VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+		stagingBuffer, stagingMemory);
+
+	void* data = nullptr;
+	check(vkMapMemory(g.device, stagingMemory, 0, static_cast<VkDeviceSize>(size), 0, &data), "vkMapMemory(texture staging)");
+	std::memcpy(data, pixels, size);
+	vkUnmapMemory(g.device, stagingMemory);
+
+	TextureResource texture;
+	texture.key = key;
+	texture.width = width;
+	texture.height = height;
+
+	createImage(width, height, VK_FORMAT_R8G8B8A8_UNORM,
+		VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
+		texture.image, texture.memory);
+
+	transitionImageLayout(texture.image, VK_FORMAT_R8G8B8A8_UNORM,
+		VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
+	copyBufferToImage(stagingBuffer, texture.image, width, height);
+	transitionImageLayout(texture.image, VK_FORMAT_R8G8B8A8_UNORM,
+		VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+
+	vkDestroyBuffer(g.device, stagingBuffer, nullptr);
+	vkFreeMemory(g.device, stagingMemory, nullptr);
+
+	texture.view = createImageView(texture.image, VK_FORMAT_R8G8B8A8_UNORM);
+	texture.sampler = createSampler();
+
+	VkDescriptorSetAllocateInfo alloc{};
+	alloc.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+	alloc.descriptorPool = g.textureDescriptorPool;
+	alloc.descriptorSetCount = 1;
+	alloc.pSetLayouts = &g.textureDescriptorSetLayout;
+	check(vkAllocateDescriptorSets(g.device, &alloc, &texture.descriptorSet), "vkAllocateDescriptorSets(texture)");
+
+	VkDescriptorImageInfo imageInfo{};
+	imageInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+	imageInfo.imageView = texture.view;
+	imageInfo.sampler = texture.sampler;
+
+	VkWriteDescriptorSet write{};
+	write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+	write.dstSet = texture.descriptorSet;
+	write.dstBinding = 0;
+	write.dstArrayElement = 0;
+	write.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+	write.descriptorCount = 1;
+	write.pImageInfo = &imageInfo;
+	vkUpdateDescriptorSets(g.device, 1, &write, 0, nullptr);
+
+	const size_t index = g.textures.size();
+	g.textures.push_back(texture);
+	g.textureCache[key] = index;
+	return index;
+}
+
+static size_t ensureTextureForMaterial(const Material& material) {
+	std::string key;
+	if (!material.diffuseTexture.empty()) {
+		key = "file:" + material.diffuseTexture;
+		auto it = g.textureCache.find(key);
+		if (it != g.textureCache.end()) {
+			return it->second;
+		}
+
+		std::vector<unsigned char> pixels;
+		int width = 0;
+		int height = 0;
+		if (LoadImageFromAssets(g.assetManager, material.diffuseTexture, 4, pixels, width, height)) {
+			const size_t size = static_cast<size_t>(width) * static_cast<size_t>(height) * 4;
+			if (size == pixels.size()) {
+				return createTextureFromPixels(key, static_cast<uint32_t>(width), static_cast<uint32_t>(height), pixels.data(), pixels.size());
+			}
+		} else {
+			LOGE("Falling back to diffuse color for material %s", material.name.c_str());
+		}
+	}
+
+	const float r = std::clamp(material.diffuseColor[0], 0.0f, 1.0f);
+	const float gCol = std::clamp(material.diffuseColor[1], 0.0f, 1.0f);
+	const float b = std::clamp(material.diffuseColor[2], 0.0f, 1.0f);
+	const unsigned char r8 = static_cast<unsigned char>(r * 255.0f);
+	const unsigned char g8 = static_cast<unsigned char>(gCol * 255.0f);
+	const unsigned char b8 = static_cast<unsigned char>(b * 255.0f);
+
+	char buffer[64];
+	std::snprintf(buffer, sizeof(buffer), "color:%u_%u_%u", r8, g8, b8);
+	key = buffer;
+	auto itColor = g.textureCache.find(key);
+	if (itColor != g.textureCache.end()) {
+		return itColor->second;
+	}
+
+	unsigned char solid[4] = { r8, g8, b8, 255 };
+	return createTextureFromPixels(key, 1, 1, solid, sizeof(solid));
+}
+
+static void destroyTextureResources() {
+	if (!g.device) {
+		g.textures.clear();
+		g.textureCache.clear();
+		g.defaultTextureIndex = INVALID_TEXTURE_INDEX;
+		return;
+	}
+	for (auto& texture : g.textures) {
+		if (texture.sampler) vkDestroySampler(g.device, texture.sampler, nullptr);
+		if (texture.view) vkDestroyImageView(g.device, texture.view, nullptr);
+		if (texture.image) vkDestroyImage(g.device, texture.image, nullptr);
+		if (texture.memory) vkFreeMemory(g.device, texture.memory, nullptr);
+	}
+	g.textures.clear();
+	g.textureCache.clear();
+	if (g.textureDescriptorPool) {
+		vkDestroyDescriptorPool(g.device, g.textureDescriptorPool, nullptr);
+		g.textureDescriptorPool = VK_NULL_HANDLE;
+	}
+	if (g.textureDescriptorSetLayout) {
+		vkDestroyDescriptorSetLayout(g.device, g.textureDescriptorSetLayout, nullptr);
+		g.textureDescriptorSetLayout = VK_NULL_HANDLE;
+	}
+	if (g.uploadCommandPool) {
+		vkDestroyCommandPool(g.device, g.uploadCommandPool, nullptr);
+		g.uploadCommandPool = VK_NULL_HANDLE;
+	}
+	g.defaultTextureIndex = INVALID_TEXTURE_INDEX;
+}
+
+static size_t getDefaultTextureIndex() {
+	if (g.defaultTextureIndex != INVALID_TEXTURE_INDEX) return g.defaultTextureIndex;
+	Material material;
+	material.name = "Default";
+	material.diffuseColor = { 1.0f, 1.0f, 1.0f };
+	material.diffuseTexture.clear();
+	size_t index = ensureTextureForMaterial(material);
+	if (index == INVALID_TEXTURE_INDEX) {
+		return INVALID_TEXTURE_INDEX;
+	}
+	g.defaultTextureIndex = index;
+	return index;
+}
+
 static void destroyGpuBuffers(GpuModel& gpuModel) {
 	if (g.device && gpuModel.indexBuffer) {
 		vkDestroyBuffer(g.device, gpuModel.indexBuffer, nullptr);
@@ -125,20 +527,55 @@ static void uploadGpuBuffers(GpuModel& gpuModel) {
 
 	destroyGpuBuffers(gpuModel);
 
-	VkDeviceSize vsize = sizeof(float) * gpuModel.cpu.positions.size();
-	VkDeviceSize isize = sizeof(uint16_t) * gpuModel.cpu.indices.size();
+	const size_t vertexCount = gpuModel.cpu.vertexCount();
+	std::vector<float> interleaved;
+	interleaved.reserve(vertexCount * 8);
+	for (size_t i = 0; i < vertexCount; ++i) {
+		const size_t posIndex = i * 3;
+		const size_t normIndex = i * 3;
+		const size_t uvIndex = i * 2;
+		float px = gpuModel.cpu.positions.size() > posIndex ? gpuModel.cpu.positions[posIndex] : 0.0f;
+		float py = gpuModel.cpu.positions.size() > posIndex + 1 ? gpuModel.cpu.positions[posIndex + 1] : 0.0f;
+		float pz = gpuModel.cpu.positions.size() > posIndex + 2 ? gpuModel.cpu.positions[posIndex + 2] : 0.0f;
+		float nx = gpuModel.cpu.normals.size() > normIndex ? gpuModel.cpu.normals[normIndex] : 0.0f;
+		float ny = gpuModel.cpu.normals.size() > normIndex + 1 ? gpuModel.cpu.normals[normIndex + 1] : 0.0f;
+		float nz = gpuModel.cpu.normals.size() > normIndex + 2 ? gpuModel.cpu.normals[normIndex + 2] : 0.0f;
+		float u = gpuModel.cpu.texcoords.size() > uvIndex ? gpuModel.cpu.texcoords[uvIndex] : 0.0f;
+		float v = gpuModel.cpu.texcoords.size() > uvIndex + 1 ? gpuModel.cpu.texcoords[uvIndex + 1] : 0.0f;
+		interleaved.push_back(px);
+		interleaved.push_back(py);
+		interleaved.push_back(pz);
+		interleaved.push_back(nx);
+		interleaved.push_back(ny);
+		interleaved.push_back(nz);
+		interleaved.push_back(u);
+		interleaved.push_back(1.0f - v); // Flip V for Vulkan coordinate system
+	}
+
+	VkDeviceSize vsize = sizeof(float) * interleaved.size();
+	VkDeviceSize isize = sizeof(uint32_t) * gpuModel.cpu.indices.size();
 
 	createBuffer(vsize, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, gpuModel.vertexBuffer, gpuModel.vertexMemory);
 	createBuffer(isize, VK_BUFFER_USAGE_INDEX_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, gpuModel.indexBuffer, gpuModel.indexMemory);
 
 	void* data = nullptr;
 	check(vkMapMemory(g.device, gpuModel.vertexMemory, 0, vsize, 0, &data), "vkMapMemory(vertex)");
-	memcpy(data, gpuModel.cpu.positions.data(), (size_t)vsize);
+	std::memcpy(data, interleaved.data(), static_cast<size_t>(vsize));
 	vkUnmapMemory(g.device, gpuModel.vertexMemory);
 
 	check(vkMapMemory(g.device, gpuModel.indexMemory, 0, isize, 0, &data), "vkMapMemory(index)");
-	memcpy(data, gpuModel.cpu.indices.data(), (size_t)isize);
+	std::memcpy(data, gpuModel.cpu.indices.data(), static_cast<size_t>(isize));
 	vkUnmapMemory(g.device, gpuModel.indexMemory);
+
+	gpuModel.materialTextureIndices.clear();
+	gpuModel.materialTextureIndices.resize(gpuModel.cpu.materials.size(), INVALID_TEXTURE_INDEX);
+	for (size_t i = 0; i < gpuModel.cpu.materials.size(); ++i) {
+		size_t textureIndex = ensureTextureForMaterial(gpuModel.cpu.materials[i]);
+		if (textureIndex == INVALID_TEXTURE_INDEX) {
+			textureIndex = getDefaultTextureIndex();
+		}
+		gpuModel.materialTextureIndices[i] = textureIndex;
+	}
 }
 
 static std::vector<uint32_t> loadSpirvFromAsset(const char* path) {
@@ -159,10 +596,16 @@ static std::vector<uint32_t> loadSpirvFromAsset(const char* path) {
 }
 
 static void buildPipelineWithBuilder() {
+	createTextureDescriptorSetLayoutIfNeeded();
 	auto vert = loadSpirvFromAsset("shaders/triangle.vert.spv");
 	auto frag = loadSpirvFromAsset("shaders/triangle.frag.spv");
+	std::vector<VkDescriptorSetLayout> layouts;
+	if (g.textureDescriptorSetLayout) {
+		layouts.push_back(g.textureDescriptorSetLayout);
+	}
 	g.builder->setVertexSpirv(vert)
 		.setFragmentSpirv(frag)
+		.setDescriptorSetLayouts(layouts)
 		.buildRenderPass()
 		.buildPipeline();
 	g.renderPass = g.builder->getRenderPass();
@@ -243,8 +686,45 @@ static void recordCommandBuffers() {
 			VkDeviceSize offsets[] = {0};
 			VkBuffer vertexBuffer = model.vertexBuffer;
 			vkCmdBindVertexBuffers(g.commandBuffers[i], 0, 1, &vertexBuffer, offsets);
-			vkCmdBindIndexBuffer(g.commandBuffers[i], model.indexBuffer, 0, VK_INDEX_TYPE_UINT16);
-			vkCmdDrawIndexed(g.commandBuffers[i], static_cast<uint32_t>(model.cpu.indexCount()), 1, 0, 0, 0);
+		vkCmdBindIndexBuffer(g.commandBuffers[i], model.indexBuffer, 0, VK_INDEX_TYPE_UINT32);
+
+		const auto& subsets = model.cpu.subsets;
+		if (!subsets.empty()) {
+			for (const auto& subset : subsets) {
+				size_t textureIndex = getDefaultTextureIndex();
+				if (subset.materialIndex < model.materialTextureIndices.size()) {
+					const size_t mapped = model.materialTextureIndices[subset.materialIndex];
+					if (mapped != INVALID_TEXTURE_INDEX) {
+						textureIndex = mapped;
+					}
+				}
+				if (textureIndex >= g.textures.size()) {
+					textureIndex = getDefaultTextureIndex();
+				}
+				if (textureIndex >= g.textures.size()) {
+					continue;
+				}
+				VkDescriptorSet descriptorSet = g.textures[textureIndex].descriptorSet;
+				if (!descriptorSet) continue;
+				vkCmdBindDescriptorSets(g.commandBuffers[i], VK_PIPELINE_BIND_POINT_GRAPHICS, g.pipelineLayout, 0, 1, &descriptorSet, 0, nullptr);
+				vkCmdDrawIndexed(g.commandBuffers[i], subset.indexCount, 1, subset.indexOffset, 0, 0);
+			}
+		} else {
+			size_t textureIndex = getDefaultTextureIndex();
+			if (!model.materialTextureIndices.empty()) {
+				const size_t mapped = model.materialTextureIndices[0];
+				if (mapped != INVALID_TEXTURE_INDEX) {
+					textureIndex = mapped;
+				}
+			}
+			if (textureIndex < g.textures.size()) {
+				VkDescriptorSet descriptorSet = g.textures[textureIndex].descriptorSet;
+				if (descriptorSet) {
+					vkCmdBindDescriptorSets(g.commandBuffers[i], VK_PIPELINE_BIND_POINT_GRAPHICS, g.pipelineLayout, 0, 1, &descriptorSet, 0, nullptr);
+					vkCmdDrawIndexed(g.commandBuffers[i], static_cast<uint32_t>(model.cpu.indexCount()), 1, 0, 0, 0);
+				}
+			}
+		}
 		}
 		vkCmdEndRenderPass(g.commandBuffers[i]);
 		check(vkEndCommandBuffer(g.commandBuffers[i]), "vkEndCommandBuffer");
@@ -276,6 +756,7 @@ static void cleanupSwapchain() {
 }
 
 static void recreateSwapchain(uint32_t width, uint32_t height) {
+	std::lock_guard<std::mutex> guard(g_stateMutex);
 	vkDeviceWaitIdle(g.device);
 	cleanupSwapchain();
 	g.builder->buildSwapchain(width, height)
@@ -298,6 +779,23 @@ static void recreateSwapchain(uint32_t width, uint32_t height) {
 
 JNIEXPORT void JNICALL
 Java_lt_smworks_multiplatform3dengine_vulkan_EngineAPI_nativeInit(JNIEnv* env, jobject thiz, jobject surface, jobject assetManager) {
+	if (!g_javaVm) {
+		env->GetJavaVM(&g_javaVm);
+	}
+	if (!g_engineApiClass) {
+		jclass localClass = env->GetObjectClass(thiz);
+		if (localClass) {
+			g_engineApiClass = reinterpret_cast<jclass>(env->NewGlobalRef(localClass));
+			env->DeleteLocalRef(localClass);
+		}
+	}
+	if (g_engineApiClass && !g_decodeTextureMethod) {
+		g_decodeTextureMethod = env->GetStaticMethodID(g_engineApiClass, "decodeTexture", "(Ljava/lang/String;)[B");
+		if (!g_decodeTextureMethod) {
+			LOGE("Failed to locate EngineAPI.decodeTexture");
+		}
+	}
+
 	g.window = ANativeWindow_fromSurface(env, surface);
 	g.assetManager = AAssetManager_fromJava(env, assetManager);
 	uint32_t width = static_cast<uint32_t>(ANativeWindow_getWidth(g.window));
@@ -346,11 +844,24 @@ Java_lt_smworks_multiplatform3dengine_vulkan_EngineAPI_nativeResize(JNIEnv* env,
 }
 
 JNIEXPORT void JNICALL
-Java_lt_smworks_multiplatform3dengine_vulkan_EngineAPI_nativeLoadModel(JNIEnv* env, jobject thiz, jfloat x, jfloat y, jfloat z) {
-	Model newModel = loadModel();
+Java_lt_smworks_multiplatform3dengine_vulkan_EngineAPI_nativeLoadModel(JNIEnv* env, jobject thiz, jstring modelName, jfloat x, jfloat y, jfloat z) {
+	std::lock_guard<std::mutex> guard(g_stateMutex);
+	const char* modelChars = modelName ? env->GetStringUTFChars(modelName, nullptr) : nullptr;
+	std::string modelPath = modelChars ? std::string(modelChars) : std::string();
+	if (modelChars) {
+		env->ReleaseStringUTFChars(modelName, modelChars);
+	}
+
+	if (modelPath.empty()) {
+		LOGE("nativeLoadModel called with empty model path");
+		return;
+	}
+
+	Model newModel = loadModel(g.assetManager, modelPath);
 	newModel.setPosition(static_cast<float>(x), static_cast<float>(y), static_cast<float>(z));
 
 	if (!newModel.hasGeometry()) {
+		LOGE("Model %s has no geometry and will be skipped", modelPath.c_str());
 		return;
 	}
 
@@ -374,6 +885,7 @@ Java_lt_smworks_multiplatform3dengine_vulkan_EngineAPI_nativeMoveCamera(JNIEnv* 
 JNIEXPORT void JNICALL
 Java_lt_smworks_multiplatform3dengine_vulkan_EngineAPI_nativeRender(JNIEnv* env, jobject thiz) {
 	if (!g.initialized) return;
+	std::unique_lock<std::mutex> stateLock(g_stateMutex);
 	size_t i = g.currentFrame % g.commandBuffers.size();
 	check(vkWaitForFences(g.device, 1, &g.inFlightFences[i], VK_TRUE, UINT64_MAX), "vkWaitForFences");
 	check(vkResetFences(g.device, 1, &g.inFlightFences[i]), "vkResetFences");
@@ -427,11 +939,48 @@ Java_lt_smworks_multiplatform3dengine_vulkan_EngineAPI_nativeRender(JNIEnv* env,
 		VkDeviceSize offsets[] = {0};
 		VkBuffer vertexBuffer = model.vertexBuffer;
 		vkCmdBindVertexBuffers(g.commandBuffers[imageIndex], 0, 1, &vertexBuffer, offsets);
-		vkCmdBindIndexBuffer(g.commandBuffers[imageIndex], model.indexBuffer, 0, VK_INDEX_TYPE_UINT16);
-		vkCmdDrawIndexed(g.commandBuffers[imageIndex], static_cast<uint32_t>(model.cpu.indexCount()), 1, 0, 0, 0);
+		vkCmdBindIndexBuffer(g.commandBuffers[imageIndex], model.indexBuffer, 0, VK_INDEX_TYPE_UINT32);
+		const auto& subsets = model.cpu.subsets;
+		if (!subsets.empty()) {
+			for (const auto& subset : subsets) {
+				size_t textureIndex = getDefaultTextureIndex();
+				if (subset.materialIndex < model.materialTextureIndices.size()) {
+					const size_t mapped = model.materialTextureIndices[subset.materialIndex];
+					if (mapped != INVALID_TEXTURE_INDEX) {
+						textureIndex = mapped;
+					}
+				}
+				if (textureIndex >= g.textures.size()) {
+					textureIndex = getDefaultTextureIndex();
+				}
+				if (textureIndex >= g.textures.size()) {
+					continue;
+				}
+				VkDescriptorSet descriptorSet = g.textures[textureIndex].descriptorSet;
+				if (!descriptorSet) continue;
+				vkCmdBindDescriptorSets(g.commandBuffers[imageIndex], VK_PIPELINE_BIND_POINT_GRAPHICS, g.pipelineLayout, 0, 1, &descriptorSet, 0, nullptr);
+				vkCmdDrawIndexed(g.commandBuffers[imageIndex], subset.indexCount, 1, subset.indexOffset, 0, 0);
+			}
+		} else {
+			size_t textureIndex = getDefaultTextureIndex();
+			if (!model.materialTextureIndices.empty()) {
+				const size_t mapped = model.materialTextureIndices[0];
+				if (mapped != INVALID_TEXTURE_INDEX) {
+					textureIndex = mapped;
+				}
+			}
+			if (textureIndex < g.textures.size()) {
+				VkDescriptorSet descriptorSet = g.textures[textureIndex].descriptorSet;
+				if (descriptorSet) {
+					vkCmdBindDescriptorSets(g.commandBuffers[imageIndex], VK_PIPELINE_BIND_POINT_GRAPHICS, g.pipelineLayout, 0, 1, &descriptorSet, 0, nullptr);
+					vkCmdDrawIndexed(g.commandBuffers[imageIndex], static_cast<uint32_t>(model.cpu.indexCount()), 1, 0, 0, 0);
+				}
+			}
+		}
 	}
 	vkCmdEndRenderPass(g.commandBuffers[imageIndex]);
 	check(vkEndCommandBuffer(g.commandBuffers[imageIndex]), "vkEndCommandBuffer");
+	stateLock.unlock();
 
 	VkPipelineStageFlags waitStage = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
 	VkSubmitInfo submit{};
@@ -443,7 +992,12 @@ Java_lt_smworks_multiplatform3dengine_vulkan_EngineAPI_nativeRender(JNIEnv* env,
 	submit.pCommandBuffers = &g.commandBuffers[imageIndex];
 	submit.signalSemaphoreCount = 1;
 	submit.pSignalSemaphores = &g.renderFinished[i];
-	check(vkQueueSubmit(g.graphicsQueue, 1, &submit, g.inFlightFences[i]), "vkQueueSubmit");
+	VkResult submitResult = vkQueueSubmit(g.graphicsQueue, 1, &submit, g.inFlightFences[i]);
+	if (submitResult == VK_ERROR_DEVICE_LOST) {
+		LOGE("vkQueueSubmit reported VK_ERROR_DEVICE_LOST");
+		return;
+	}
+	check(submitResult, "vkQueueSubmit");
 
 	VkPresentInfoKHR present{};
 	present.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
@@ -461,6 +1015,7 @@ Java_lt_smworks_multiplatform3dengine_vulkan_EngineAPI_nativeRender(JNIEnv* env,
 JNIEXPORT void JNICALL
 Java_lt_smworks_multiplatform3dengine_vulkan_EngineAPI_nativeDestroy(JNIEnv* env, jobject thiz) {
 	if (!g.initialized) return;
+	std::lock_guard<std::mutex> guard(g_stateMutex);
 	vkDeviceWaitIdle(g.device);
 	for (size_t i = 0; i < g.imageAvailable.size(); ++i) {
 		if (g.imageAvailable[i]) vkDestroySemaphore(g.device, g.imageAvailable[i], nullptr);
@@ -470,6 +1025,7 @@ Java_lt_smworks_multiplatform3dengine_vulkan_EngineAPI_nativeDestroy(JNIEnv* env
 	g.imageAvailable.clear();
 	g.renderFinished.clear();
 	g.inFlightFences.clear();
+	destroyTextureResources();
 	if (g.commandPool) vkDestroyCommandPool(g.device, g.commandPool, nullptr);
 	cleanupSwapchain();
 	if (g.device) vkDestroyDevice(g.device, nullptr);

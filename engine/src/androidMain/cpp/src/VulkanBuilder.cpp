@@ -211,6 +211,11 @@ VulkanBuilder& VulkanBuilder::setFragmentSpirv(const std::vector<uint32_t>& frag
 	return *this;
 }
 
+VulkanBuilder& VulkanBuilder::setDescriptorSetLayouts(const std::vector<VkDescriptorSetLayout>& layouts) {
+	descriptorSetLayouts = layouts;
+	return *this;
+}
+
 VulkanBuilder& VulkanBuilder::buildPipeline() {
 	auto createShaderModule = [&](const std::vector<uint32_t>& code, VkShaderModule& out) {
 		VkShaderModuleCreateInfo ci{};
@@ -237,7 +242,7 @@ VulkanBuilder& VulkanBuilder::buildPipeline() {
 
 	VkVertexInputBindingDescription binding{};
 	binding.binding = 0;
-	binding.stride = sizeof(float) * 3;
+	binding.stride = sizeof(float) * 8;
 	binding.inputRate = VK_VERTEX_INPUT_RATE_VERTEX;
 	VkVertexInputAttributeDescription attr{};
 	attr.location = 0;
@@ -248,8 +253,18 @@ VulkanBuilder& VulkanBuilder::buildPipeline() {
 	vertexInput.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
 	vertexInput.vertexBindingDescriptionCount = 1;
 	vertexInput.pVertexBindingDescriptions = &binding;
-	vertexInput.vertexAttributeDescriptionCount = 1;
-	vertexInput.pVertexAttributeDescriptions = &attr;
+	VkVertexInputAttributeDescription attrs[3]{};
+	attrs[0] = attr;
+	attrs[1].location = 1;
+	attrs[1].binding = 0;
+	attrs[1].format = VK_FORMAT_R32G32B32_SFLOAT;
+	attrs[1].offset = sizeof(float) * 3;
+	attrs[2].location = 2;
+	attrs[2].binding = 0;
+	attrs[2].format = VK_FORMAT_R32G32_SFLOAT;
+	attrs[2].offset = sizeof(float) * 6;
+	vertexInput.vertexAttributeDescriptionCount = 3;
+	vertexInput.pVertexAttributeDescriptions = attrs;
 
 	VkPipelineInputAssemblyStateCreateInfo inputAssembly{};
 	inputAssembly.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
@@ -299,6 +314,8 @@ VulkanBuilder& VulkanBuilder::buildPipeline() {
 	
 	VkPipelineLayoutCreateInfo layoutCi{};
 	layoutCi.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+	layoutCi.setLayoutCount = static_cast<uint32_t>(descriptorSetLayouts.size());
+	layoutCi.pSetLayouts = descriptorSetLayouts.empty() ? nullptr : descriptorSetLayouts.data();
 	layoutCi.pushConstantRangeCount = 1;
 	layoutCi.pPushConstantRanges = &pushConstantRange;
 	check(vkCreatePipelineLayout(device, &layoutCi, nullptr, &pipelineLayout), "vkCreatePipelineLayout");
