@@ -5,6 +5,8 @@ import android.view.SurfaceHolder
 import android.view.SurfaceView
 import android.view.MotionEvent
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.viewinterop.AndroidView
 import kotlin.math.abs
@@ -21,10 +23,17 @@ internal fun setCurrentRendererForGestures(renderer: VulkanNativeRenderer) {
 
 @Composable
 actual fun VulkanScreen(
-	modifier: Modifier,
-	onCreate: (VulkanRenderTarget) -> Unit,
-	onDestroy: () -> Unit
+	modifier: Modifier
 ) {
+    val renderer = remember { VulkanNativeRenderer() }
+    renderer.setupForGestures()
+
+    DisposableEffect(Unit) {
+        onDispose {
+            renderer.destroy()
+        }
+    }
+
 	AndroidView(
 		modifier = modifier,
 		factory = { context ->
@@ -36,13 +45,14 @@ actual fun VulkanScreen(
 					override fun surfaceCreated(holder: SurfaceHolder) {
 						val surface = holder.surface
 						if (surface != null && surface.isValid) {
-							onCreate(surface)
+                            renderer.init(surface, context.assets)
+                            renderer.start()
 						}
 					}
 					override fun surfaceChanged(holder: SurfaceHolder, format: Int, width: Int, height: Int) {
 					}
 					override fun surfaceDestroyed(holder: SurfaceHolder) {
-						onDestroy()
+                        renderer.destroy()
 					}
 				})
 				

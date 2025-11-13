@@ -8,21 +8,10 @@ plugins {
 kotlin {
 	androidTarget()
 
-	listOf(
-		iosArm64(),
-		iosSimulatorArm64()
-	)
-
-	jvm()
-
-	js {
-		browser()
-	}
-
-	@OptIn(org.jetbrains.kotlin.gradle.ExperimentalWasmDsl::class)
-	wasmJs {
-		browser()
-	}
+    listOf(
+        iosArm64(),
+        iosSimulatorArm64()
+    )
 
 	sourceSets {
 		commonMain.dependencies {

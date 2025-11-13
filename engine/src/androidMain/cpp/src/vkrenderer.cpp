@@ -347,12 +347,6 @@ Java_lt_smworks_multiplatform3dengine_vulkan_VulkanNativeRenderer_nativeRender(J
 	};
 	vkCmdPushConstants(g.commandBuffers[imageIndex], g.pipelineLayout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(pushConstants), pushConstants);
 	
-	// Debug: log rotation values occasionally (every 60 frames)
-	if (g.currentFrame % 60 == 0) {
-		LOGI("Pushing rotation: yaw=%.3f pitch=%.3f roll=%.3f w=%.0f h=%.0f", 
-			pushConstants[0], pushConstants[1], pushConstants[2], pushConstants[3], pushConstants[4]);
-	}
-	
 	VkDeviceSize offsets[] = {0};
 	vkCmdBindVertexBuffers(g.commandBuffers[imageIndex], 0, 1, &g.vertexBuffer, offsets);
 	vkCmdBindIndexBuffer(g.commandBuffers[imageIndex], g.indexBuffer, 0, VK_INDEX_TYPE_UINT16);
