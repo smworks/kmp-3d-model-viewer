@@ -39,8 +39,8 @@ actual class EngineAPI actual constructor() {
         nativeRotateCamera(yaw, pitch, roll)
     }
 
-    actual fun loadModel() {
-        nativeLoadModel()
+    actual fun loadModel(x: Float, y: Float, z: Float) {
+        nativeLoadModel(x, y, z)
     }
 
     actual fun moveCamera(delta: Float) {
@@ -62,7 +62,7 @@ actual class EngineAPI actual constructor() {
     private external fun nativeRender()
     private external fun nativeRotateCamera(yaw: Float, pitch: Float, roll: Float)
     private external fun nativeDestroy()
-    private external fun nativeLoadModel()
+    private external fun nativeLoadModel(x: Float, y: Float, z: Float)
     private external fun nativeMoveCamera(delta: Float)
 }
 

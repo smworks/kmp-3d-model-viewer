@@ -10,6 +10,9 @@ layout(push_constant) uniform PushConstants {
 	float width;
 	float height;
 	float distance;
+	float modelX;
+	float modelY;
+	float modelZ;
 } pc;
 
 mat4 rotationMatrix(vec3 axis, float angle) {
@@ -39,6 +42,7 @@ void main() {
 	
 	mat4 rotation = rotZ * rotX * rotY;
 	vec4 worldPos = rotation * vec4(scaledPos, 1.0);
+	worldPos.xyz += vec3(pc.modelX, pc.modelY, pc.modelZ);
 	
 	// Simple view transform: move the model along the camera's forward axis (negative Z)
 	vec4 viewPos = worldPos + vec4(0.0, 0.0, pc.distance, 0.0);

@@ -47,6 +47,8 @@ struct VulkanState {
 	size_t currentFrame = 0;
 	bool initialized = false;
 	Camera camera;
+	bool modelLoaded = false;
+	float modelOffset[3] = {0.0f, 0.0f, 0.0f};
 };
 
 static VulkanState g;
@@ -94,11 +96,15 @@ static void destroyModelBuffers() {
 	if (g.indexMemory) { vkFreeMemory(g.device, g.indexMemory, nullptr); g.indexMemory = VK_NULL_HANDLE; }
 	if (g.vertexBuffer) { vkDestroyBuffer(g.device, g.vertexBuffer, nullptr); g.vertexBuffer = VK_NULL_HANDLE; }
 	if (g.vertexMemory) { vkFreeMemory(g.device, g.vertexMemory, nullptr); g.vertexMemory = VK_NULL_HANDLE; }
+	g.indexCount = 0;
 }
 
-static void uploadModelBuffers() {
+static void uploadModelBuffers(float x, float y, float z) {
 	Model model = loadModel();
 	g.indexCount = static_cast<uint32_t>(model.indices.size());
+	g.modelOffset[0] = x;
+	g.modelOffset[1] = y;
+	g.modelOffset[2] = z;
 
 	VkDeviceSize vsize = sizeof(float) * model.positions.size();
 	VkDeviceSize isize = sizeof(uint16_t) * model.indices.size();
@@ -197,22 +203,25 @@ static void recordCommandBuffers() {
 		// Apply camera viewport/scissor and draw
 		g.camera.applyToCommandBuffer(g.commandBuffers[i]);
 		vkCmdBindPipeline(g.commandBuffers[i], VK_PIPELINE_BIND_POINT_GRAPHICS, g.graphicsPipeline);
-		
-		// Push camera constants
-		float rotationData[6] = {
-			g.camera.getYaw(),
-			g.camera.getPitch(),
-			g.camera.getRoll(),
-			g.camera.getWidth(),
-			g.camera.getHeight(),
-			g.camera.getDistance()
-		};
-		vkCmdPushConstants(g.commandBuffers[i], g.pipelineLayout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(rotationData), rotationData);
-		
-		VkDeviceSize offsets[] = {0};
-		vkCmdBindVertexBuffers(g.commandBuffers[i], 0, 1, &g.vertexBuffer, offsets);
-		vkCmdBindIndexBuffer(g.commandBuffers[i], g.indexBuffer, 0, VK_INDEX_TYPE_UINT16);
-		vkCmdDrawIndexed(g.commandBuffers[i], g.indexCount, 1, 0, 0, 0);
+		if (g.indexCount > 0 && g.vertexBuffer && g.indexBuffer) {
+			float pushConstants[9] = {
+				g.camera.getYaw(),
+				g.camera.getPitch(),
+				g.camera.getRoll(),
+				g.camera.getWidth(),
+				g.camera.getHeight(),
+				g.camera.getDistance(),
+				g.modelOffset[0],
+				g.modelOffset[1],
+				g.modelOffset[2]
+			};
+			vkCmdPushConstants(g.commandBuffers[i], g.pipelineLayout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(pushConstants), pushConstants);
+			
+			VkDeviceSize offsets[] = {0};
+			vkCmdBindVertexBuffers(g.commandBuffers[i], 0, 1, &g.vertexBuffer, offsets);
+			vkCmdBindIndexBuffer(g.commandBuffers[i], g.indexBuffer, 0, VK_INDEX_TYPE_UINT16);
+			vkCmdDrawIndexed(g.commandBuffers[i], g.indexCount, 1, 0, 0, 0);
+		}
 		vkCmdEndRenderPass(g.commandBuffers[i]);
 		check(vkEndCommandBuffer(g.commandBuffers[i]), "vkEndCommandBuffer");
 	}
@@ -254,7 +263,9 @@ static void recreateSwapchain(uint32_t width, uint32_t height) {
 	g.swapchainImageViews = g.builder->getSwapchainImageViews();
 	g.camera.updateViewport(g.swapchainExtent);
 	buildPipelineWithBuilder();
-	uploadModelBuffers();
+	if (g.modelLoaded) {
+		uploadModelBuffers(g.modelOffset[0], g.modelOffset[1], g.modelOffset[2]);
+	}
 	createFramebuffers();
 	createCommandPoolBuffers();
 	recordCommandBuffers();
@@ -292,7 +303,9 @@ Java_lt_smworks_multiplatform3dengine_vulkan_EngineAPI_nativeInit(JNIEnv* env, j
 	// Build render pass and pipeline via builder
 	buildPipelineWithBuilder();
 	// proceed with buffers/command buffers
-	uploadModelBuffers();
+	if (g.modelLoaded) {
+		uploadModelBuffers(g.modelOffset[0], g.modelOffset[1], g.modelOffset[2]);
+	}
 	createFramebuffers();
 	createCommandPoolBuffers();
 	recordCommandBuffers();
@@ -309,11 +322,12 @@ Java_lt_smworks_multiplatform3dengine_vulkan_EngineAPI_nativeResize(JNIEnv* env,
 }
 
 JNIEXPORT void JNICALL
-Java_lt_smworks_multiplatform3dengine_vulkan_EngineAPI_nativeLoadModel(JNIEnv* env, jobject thiz) {
+Java_lt_smworks_multiplatform3dengine_vulkan_EngineAPI_nativeLoadModel(JNIEnv* env, jobject thiz, jfloat x, jfloat y, jfloat z) {
 	if (!g.initialized) return;
 	vkDeviceWaitIdle(g.device);
 	destroyModelBuffers();
-	uploadModelBuffers();
+	uploadModelBuffers(static_cast<float>(x), static_cast<float>(y), static_cast<float>(z));
+	g.modelLoaded = true;
 }
 
 JNIEXPORT void JNICALL
@@ -357,22 +371,25 @@ Java_lt_smworks_multiplatform3dengine_vulkan_EngineAPI_nativeRender(JNIEnv* env,
 	// Apply camera viewport/scissor
 	g.camera.applyToCommandBuffer(g.commandBuffers[imageIndex]);
 	vkCmdBindPipeline(g.commandBuffers[imageIndex], VK_PIPELINE_BIND_POINT_GRAPHICS, g.graphicsPipeline);
-	
-	// Push current camera rotation constants and viewport dimensions
-	float pushConstants[6] = {
-		g.camera.getYaw(),
-		g.camera.getPitch(),
-		g.camera.getRoll(),
-		g.camera.getWidth(),
-		g.camera.getHeight(),
-		g.camera.getDistance()
-	};
-	vkCmdPushConstants(g.commandBuffers[imageIndex], g.pipelineLayout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(pushConstants), pushConstants);
-	
-	VkDeviceSize offsets[] = {0};
-	vkCmdBindVertexBuffers(g.commandBuffers[imageIndex], 0, 1, &g.vertexBuffer, offsets);
-	vkCmdBindIndexBuffer(g.commandBuffers[imageIndex], g.indexBuffer, 0, VK_INDEX_TYPE_UINT16);
-	vkCmdDrawIndexed(g.commandBuffers[imageIndex], g.indexCount, 1, 0, 0, 0);
+	if (g.indexCount > 0 && g.vertexBuffer && g.indexBuffer) {
+		float pushConstants[9] = {
+			g.camera.getYaw(),
+			g.camera.getPitch(),
+			g.camera.getRoll(),
+			g.camera.getWidth(),
+			g.camera.getHeight(),
+			g.camera.getDistance(),
+			g.modelOffset[0],
+			g.modelOffset[1],
+			g.modelOffset[2]
+		};
+		vkCmdPushConstants(g.commandBuffers[imageIndex], g.pipelineLayout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(pushConstants), pushConstants);
+		
+		VkDeviceSize offsets[] = {0};
+		vkCmdBindVertexBuffers(g.commandBuffers[imageIndex], 0, 1, &g.vertexBuffer, offsets);
+		vkCmdBindIndexBuffer(g.commandBuffers[imageIndex], g.indexBuffer, 0, VK_INDEX_TYPE_UINT16);
+		vkCmdDrawIndexed(g.commandBuffers[imageIndex], g.indexCount, 1, 0, 0, 0);
+	}
 	vkCmdEndRenderPass(g.commandBuffers[imageIndex]);
 	check(vkEndCommandBuffer(g.commandBuffers[imageIndex]), "vkEndCommandBuffer");
 
