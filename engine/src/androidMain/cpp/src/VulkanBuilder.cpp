@@ -306,11 +306,11 @@ VulkanBuilder& VulkanBuilder::buildPipeline() {
 	dynamicState.dynamicStateCount = 2;
 	dynamicState.pDynamicStates = dynamics;
 
-	// Push constants for camera rotation, viewport size, distance, model translation, and scale (10 floats)
+	// Push constants for camera rotation, viewport size, distance, model translation, scale, and model rotation (13 floats)
 	VkPushConstantRange pushConstantRange{};
 	pushConstantRange.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
 	pushConstantRange.offset = 0;
-	pushConstantRange.size = sizeof(float) * 10;
+	pushConstantRange.size = sizeof(float) * 13;
 	
 	VkPipelineLayoutCreateInfo layoutCi{};
 	layoutCi.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;

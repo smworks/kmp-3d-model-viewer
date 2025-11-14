@@ -7,14 +7,26 @@ import android.content.res.AssetManager
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicLong
 
 actual class EngineAPI actual constructor() {
     private val running = AtomicBoolean(false)
     private var thread: Thread? = null
     private var isNativeReady = false
 
-    private data class ModelState(val name: String, val x: Float, val y: Float, val z: Float, val scale: Float)
-    private val modelStates = mutableListOf<ModelState>()
+    private data class ModelState(
+        val id: Long,
+        val name: String,
+        var x: Float,
+        var y: Float,
+        var z: Float,
+        var scale: Float,
+        var rotX: Float = 0f,
+        var rotY: Float = 0f,
+        var rotZ: Float = 0f,
+    )
+    private val modelStates = LinkedHashMap<Long, ModelState>()
+    private val modelIdGenerator = AtomicLong(1L)
     private var accumulatedCameraDistance = 0f
     private var accumulatedYaw = 0f
     private var accumulatedPitch = 0f
@@ -59,17 +71,30 @@ actual class EngineAPI actual constructor() {
         }
     }
 
-    actual fun loadModel(modelName: String, x: Float, y: Float, z: Float, scale: Float) {
-        modelStates.add(ModelState(modelName, x, y, z, scale))
+    actual fun loadModel(modelName: String, x: Float, y: Float, z: Float, scale: Float): Long {
+        val modelId = modelIdGenerator.getAndIncrement()
+        val state = ModelState(modelId, modelName, x, y, z, scale)
+        modelStates[modelId] = state
         if (isNativeReady) {
-            nativeLoadModel(modelName, x, y, z, scale)
+            nativeLoadModel(modelId, modelName, x, y, z, scale)
         }
+        return modelId
     }
 
     actual fun moveCamera(delta: Float) {
         accumulatedCameraDistance += delta
         if (isNativeReady) {
             nativeMoveCamera(delta)
+        }
+    }
+
+    actual fun rotate(modelId: Long, rotationX: Float, rotationY: Float, rotationZ: Float) {
+        val state = modelStates[modelId] ?: return
+        state.rotX = rotationX
+        state.rotY = rotationY
+        state.rotZ = rotationZ
+        if (isNativeReady) {
+            nativeRotateModel(modelId, rotationX, rotationY, rotationZ)
         }
     }
 
@@ -86,8 +111,11 @@ actual class EngineAPI actual constructor() {
     }
 
     private fun restoreSceneState() {
-        modelStates.forEach { state ->
-            nativeLoadModel(state.name, state.x, state.y, state.z, state.scale)
+        modelStates.values.forEach { state ->
+            nativeLoadModel(state.id, state.name, state.x, state.y, state.z, state.scale)
+            if (state.rotX != 0f || state.rotY != 0f || state.rotZ != 0f) {
+                nativeRotateModel(state.id, state.rotX, state.rotY, state.rotZ)
+            }
         }
         if (accumulatedCameraDistance != 0f) {
             nativeMoveCamera(accumulatedCameraDistance)
@@ -102,8 +130,9 @@ actual class EngineAPI actual constructor() {
     private external fun nativeRender()
     private external fun nativeRotateCamera(yaw: Float, pitch: Float, roll: Float)
     private external fun nativeDestroy()
-    private external fun nativeLoadModel(modelName: String, x: Float, y: Float, z: Float, scale: Float)
+    private external fun nativeLoadModel(modelId: Long, modelName: String, x: Float, y: Float, z: Float, scale: Float)
     private external fun nativeMoveCamera(delta: Float)
+    private external fun nativeRotateModel(modelId: Long, rotationX: Float, rotationY: Float, rotationZ: Float)
 
     companion object {
         private var sharedAssetManager: AssetManager? = null

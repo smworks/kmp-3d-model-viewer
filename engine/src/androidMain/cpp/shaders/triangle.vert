@@ -19,6 +19,9 @@ layout(push_constant) uniform PushConstants {
 	float modelY;
 	float modelZ;
 	float modelScale;
+	float modelRotX;
+	float modelRotY;
+	float modelRotZ;
 } pc;
 
 mat4 rotationMatrix(vec3 axis, float angle) {
@@ -47,13 +50,19 @@ void main() {
 
 	// Model position in world space with uniform scaling
 	vec3 scaledPos = inPos * pc.modelScale;
-	vec4 worldPos = vec4(scaledPos + vec3(pc.modelX, pc.modelY, pc.modelZ), 1.0);
+	mat4 modelRotXMat = rotationMatrix(vec3(1.0, 0.0, 0.0), pc.modelRotX);
+	mat4 modelRotYMat = rotationMatrix(vec3(0.0, 1.0, 0.0), pc.modelRotY);
+	mat4 modelRotZMat = rotationMatrix(vec3(0.0, 0.0, 1.0), pc.modelRotZ);
+	mat4 modelRotation = modelRotZMat * modelRotYMat * modelRotXMat;
+	vec4 rotatedPos = modelRotation * vec4(scaledPos, 1.0);
+	vec4 worldPos = vec4(rotatedPos.xyz + vec3(pc.modelX, pc.modelY, pc.modelZ), 1.0);
 
 	// Camera positioned along negative Z axis by distance
 	vec3 cameraPos = vec3(0.0, 0.0, -pc.distance);
 	vec4 viewPos = vec4(worldPos.xyz - cameraPos, 1.0);
 	viewPos = viewRotation * viewPos;
-	fragNormal = mat3(viewRotation) * inNormal;
+	mat3 modelNormalMatrix = mat3(modelRotation);
+	fragNormal = mat3(viewRotation) * modelNormalMatrix * inNormal;
 	fragUV = inUV;
 	
 	// Perspective projection using vertical FOV of 60 degrees

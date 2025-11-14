@@ -15,6 +15,7 @@
 #include <cstdio>
 #include <limits>
 #include <cstddef>
+#include <cstdint>
 #include <mutex>
 
 #include "ImageLoader.h"
@@ -29,6 +30,7 @@ static constexpr size_t INVALID_TEXTURE_INDEX = std::numeric_limits<size_t>::max
 #define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, LOG_TAG, __VA_ARGS__)
 
 struct GpuModel {
+	int64_t id = 0;
 	Model cpu;
 	VkBuffer vertexBuffer = VK_NULL_HANDLE;
 	VkDeviceMemory vertexMemory = VK_NULL_HANDLE;
@@ -86,6 +88,15 @@ struct VulkanState {
 
 static VulkanState g;
 static std::mutex g_stateMutex;
+
+static GpuModel* findModelById(int64_t modelId) {
+	for (auto& model : g.models) {
+		if (model.id == modelId) {
+			return &model;
+		}
+	}
+	return nullptr;
+}
 
 JavaVM* g_javaVm = nullptr;
 jclass g_engineApiClass = nullptr;
@@ -670,7 +681,7 @@ static void recordCommandBuffers() {
 				continue;
 			}
 
-			float pushConstants[10] = {
+			float pushConstants[13] = {
 				g.camera.getYaw(),
 				g.camera.getPitch(),
 				g.camera.getRoll(),
@@ -680,7 +691,10 @@ static void recordCommandBuffers() {
 				model.cpu.position[0],
 				model.cpu.position[1],
 				model.cpu.position[2],
-				model.cpu.scale
+				model.cpu.scale,
+				model.cpu.rotation[0],
+				model.cpu.rotation[1],
+				model.cpu.rotation[2]
 			};
 			vkCmdPushConstants(g.commandBuffers[i], g.pipelineLayout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(pushConstants), pushConstants);
 
@@ -845,7 +859,7 @@ Java_lt_smworks_multiplatform3dengine_vulkan_EngineAPI_nativeResize(JNIEnv* env,
 }
 
 JNIEXPORT void JNICALL
-Java_lt_smworks_multiplatform3dengine_vulkan_EngineAPI_nativeLoadModel(JNIEnv* env, jobject thiz, jstring modelName, jfloat x, jfloat y, jfloat z, jfloat scale) {
+Java_lt_smworks_multiplatform3dengine_vulkan_EngineAPI_nativeLoadModel(JNIEnv* env, jobject thiz, jlong modelId, jstring modelName, jfloat x, jfloat y, jfloat z, jfloat scale) {
 	std::lock_guard<std::mutex> guard(g_stateMutex);
 	const char* modelChars = modelName ? env->GetStringUTFChars(modelName, nullptr) : nullptr;
 	std::string modelPath = modelChars ? std::string(modelChars) : std::string();
@@ -869,6 +883,7 @@ Java_lt_smworks_multiplatform3dengine_vulkan_EngineAPI_nativeLoadModel(JNIEnv* e
 	}
 
 	GpuModel gpuModel;
+	gpuModel.id = static_cast<int64_t>(modelId);
 	gpuModel.cpu = std::move(newModel);
 
 	if (g.initialized) {
@@ -883,6 +898,19 @@ JNIEXPORT void JNICALL
 Java_lt_smworks_multiplatform3dengine_vulkan_EngineAPI_nativeMoveCamera(JNIEnv* env, jobject thiz, jfloat delta) {
 	if (!g.initialized) return;
 	g.camera.move(static_cast<float>(delta));
+}
+
+JNIEXPORT void JNICALL
+Java_lt_smworks_multiplatform3dengine_vulkan_EngineAPI_nativeRotateModel(JNIEnv* env, jobject thiz, jlong modelId, jfloat rotationX, jfloat rotationY, jfloat rotationZ) {
+	if (!g.initialized) {
+		return;
+	}
+	std::lock_guard<std::mutex> guard(g_stateMutex);
+	GpuModel* gpuModel = findModelById(static_cast<int64_t>(modelId));
+	if (!gpuModel) {
+		return;
+	}
+	gpuModel->cpu.setRotation(static_cast<float>(rotationX), static_cast<float>(rotationY), static_cast<float>(rotationZ));
 }
 
 JNIEXPORT void JNICALL
@@ -926,7 +954,7 @@ Java_lt_smworks_multiplatform3dengine_vulkan_EngineAPI_nativeRender(JNIEnv* env,
 			continue;
 		}
 
-		float pushConstants[10] = {
+		float pushConstants[13] = {
 			g.camera.getYaw(),
 			g.camera.getPitch(),
 			g.camera.getRoll(),
@@ -936,7 +964,10 @@ Java_lt_smworks_multiplatform3dengine_vulkan_EngineAPI_nativeRender(JNIEnv* env,
 			model.cpu.position[0],
 			model.cpu.position[1],
 			model.cpu.position[2],
-			model.cpu.scale
+			model.cpu.scale,
+			model.cpu.rotation[0],
+			model.cpu.rotation[1],
+			model.cpu.rotation[2]
 		};
 		vkCmdPushConstants(g.commandBuffers[imageIndex], g.pipelineLayout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(pushConstants), pushConstants);
 

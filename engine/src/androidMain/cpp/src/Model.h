@@ -26,6 +26,7 @@ struct Model {
 	std::vector<Subset> subsets;
 	float position[3] = { 0.0f, 0.0f, 0.0f }; // model translation
 	float scale = 1.0f;
+	float rotation[3] = { 0.0f, 0.0f, 0.0f };
 
 	void setPosition(float x, float y, float z) {
 		position[0] = x;
@@ -35,6 +36,12 @@ struct Model {
 
 	void setScale(float value) {
 		scale = value;
+	}
+
+	void setRotation(float x, float y, float z) {
+		rotation[0] = x;
+		rotation[1] = y;
+		rotation[2] = z;
 	}
 
 	size_t vertexCount() const {
