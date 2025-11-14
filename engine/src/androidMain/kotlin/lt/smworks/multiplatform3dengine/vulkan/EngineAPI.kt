@@ -13,6 +13,10 @@ actual class EngineAPI actual constructor() {
     private val running = AtomicBoolean(false)
     private var thread: Thread? = null
     private var isNativeReady = false
+    @Volatile
+    private var currentFps = 0
+    private var frameCounter = 0L
+    private var lastFpsTimestamp = 0L
 
     private data class ModelState(
         val id: Long,
@@ -48,6 +52,7 @@ actual class EngineAPI actual constructor() {
         thread = Thread {
             while (running.get()) {
                 nativeRender()
+                recordFrame()
             }
         }.apply { start() }
     }
@@ -56,6 +61,9 @@ actual class EngineAPI actual constructor() {
         running.set(false)
         thread?.join()
         thread = null
+        frameCounter = 0L
+        lastFpsTimestamp = 0L
+        currentFps = 0
     }
 
     fun resize(width: Int, height: Int) {
@@ -70,6 +78,8 @@ actual class EngineAPI actual constructor() {
             nativeRotateCamera(yaw, pitch, roll)
         }
     }
+
+    actual fun getFps(): Int = currentFps
 
     actual fun loadModel(modelName: String, x: Float, y: Float, z: Float, scale: Float): Long {
         val modelId = modelIdGenerator.getAndIncrement()
@@ -108,6 +118,28 @@ actual class EngineAPI actual constructor() {
         nativeDestroy()
         isNativeReady = false
         setSharedAssetManager(null)
+    }
+
+    private fun recordFrame() {
+        val now = System.nanoTime()
+        if (lastFpsTimestamp == 0L) {
+            lastFpsTimestamp = now
+            frameCounter = 0L
+            return
+        }
+
+        frameCounter += 1
+        val elapsed = now - lastFpsTimestamp
+        if (elapsed >= 1_000_000_000L) {
+            val frames = frameCounter
+            currentFps = if (elapsed > 0L) {
+                ((frames * 1_000_000_000L) / elapsed).toInt()
+            } else {
+                frames.toInt()
+            }
+            frameCounter = 0L
+            lastFpsTimestamp = now
+        }
     }
 
     private fun restoreSceneState() {

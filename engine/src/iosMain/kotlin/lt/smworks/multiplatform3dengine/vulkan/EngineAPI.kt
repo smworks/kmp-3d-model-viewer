@@ -15,6 +15,8 @@ actual class EngineAPI actual constructor() {
     actual fun rotate(modelId: Long, rotationX: Float, rotationY: Float, rotationZ: Float) {
         // No-op on iOS until native renderer is implemented.
     }
+
+    actual fun getFps(): Int = 0
 }
 
 
