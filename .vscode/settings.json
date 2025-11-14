@@ -1,5 +1,11 @@
 {
     "files.associations": {
-        "vector": "cpp"
+        "vector": "cpp",
+        "utility": "cpp",
+        "unordered_map": "cpp",
+        "algorithm": "cpp",
+        "cstddef": "cpp",
+        "cstdint": "cpp",
+        "mutex": "cpp"
     }
 }

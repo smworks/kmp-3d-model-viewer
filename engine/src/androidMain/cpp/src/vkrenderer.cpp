@@ -65,6 +65,10 @@ struct VulkanState {
 	VkExtent2D swapchainExtent{};
 	std::vector<VkImage> swapchainImages;
 	std::vector<VkImageView> swapchainImageViews;
+	VkFormat depthFormat = VK_FORMAT_UNDEFINED;
+	std::vector<VkImage> depthImages;
+	std::vector<VkDeviceMemory> depthImageMemory;
+	std::vector<VkImageView> depthImageViews;
 	VkRenderPass renderPass = VK_NULL_HANDLE;
 	VkPipelineLayout pipelineLayout = VK_NULL_HANDLE;
 	VkPipeline graphicsPipeline = VK_NULL_HANDLE;
@@ -168,13 +172,13 @@ static void createImage(uint32_t width, uint32_t height, VkFormat format, VkImag
 	check(vkBindImageMemory(g.device, image, memory, 0), "vkBindImageMemory");
 }
 
-static VkImageView createImageView(VkImage image, VkFormat format) {
+static VkImageView createImageView(VkImage image, VkFormat format, VkImageAspectFlags aspectMask) {
 	VkImageViewCreateInfo viewInfo{};
 	viewInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
 	viewInfo.image = image;
 	viewInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
 	viewInfo.format = format;
-	viewInfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+	viewInfo.subresourceRange.aspectMask = aspectMask;
 	viewInfo.subresourceRange.baseMipLevel = 0;
 	viewInfo.subresourceRange.levelCount = 1;
 	viewInfo.subresourceRange.baseArrayLayer = 0;
@@ -242,8 +246,18 @@ static void endSingleTimeCommands(VkCommandBuffer cmd) {
 	vkFreeCommandBuffers(g.device, g.uploadCommandPool, 1, &cmd);
 }
 
-static void transitionImageLayout(VkImage image, VkFormat format, VkImageLayout oldLayout, VkImageLayout newLayout) {
-	(void)format;
+static bool hasStencilComponent(VkFormat format) {
+	return format == VK_FORMAT_D32_SFLOAT_S8_UINT || format == VK_FORMAT_D24_UNORM_S8_UINT;
+}
+
+static void transitionImageLayout(VkImage image, VkFormat format, VkImageLayout oldLayout, VkImageLayout newLayout, VkImageAspectFlags aspectMask) {
+	VkImageAspectFlags resolvedAspect = aspectMask;
+	if ((aspectMask & VK_IMAGE_ASPECT_DEPTH_BIT) && hasStencilComponent(format)) {
+		resolvedAspect |= VK_IMAGE_ASPECT_STENCIL_BIT;
+	}
+	if (!resolvedAspect) {
+		resolvedAspect = VK_IMAGE_ASPECT_COLOR_BIT;
+	}
 	VkCommandBuffer cmd = beginSingleTimeCommands();
 	if (!cmd) return;
 
@@ -254,7 +268,7 @@ static void transitionImageLayout(VkImage image, VkFormat format, VkImageLayout 
 	barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
 	barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
 	barrier.image = image;
-	barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+	barrier.subresourceRange.aspectMask = resolvedAspect;
 	barrier.subresourceRange.baseMipLevel = 0;
 	barrier.subresourceRange.levelCount = 1;
 	barrier.subresourceRange.baseArrayLayer = 0;
@@ -273,6 +287,11 @@ static void transitionImageLayout(VkImage image, VkFormat format, VkImageLayout 
 		barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
 		sourceStage = VK_PIPELINE_STAGE_TRANSFER_BIT;
 		destinationStage = VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
+	} else if (oldLayout == VK_IMAGE_LAYOUT_UNDEFINED && newLayout == VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL) {
+		barrier.srcAccessMask = 0;
+		barrier.dstAccessMask = VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+		sourceStage = VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT;
+		destinationStage = VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT;
 	} else {
 		LOGE("Unsupported image layout transition");
 	}
@@ -383,15 +402,15 @@ static size_t createTextureFromPixels(const std::string& key, uint32_t width, ui
 		texture.image, texture.memory);
 
 	transitionImageLayout(texture.image, VK_FORMAT_R8G8B8A8_UNORM,
-		VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
+		VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_ASPECT_COLOR_BIT);
 	copyBufferToImage(stagingBuffer, texture.image, width, height);
 	transitionImageLayout(texture.image, VK_FORMAT_R8G8B8A8_UNORM,
-		VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+		VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_IMAGE_ASPECT_COLOR_BIT);
 
 	vkDestroyBuffer(g.device, stagingBuffer, nullptr);
 	vkFreeMemory(g.device, stagingMemory, nullptr);
 
-	texture.view = createImageView(texture.image, VK_FORMAT_R8G8B8A8_UNORM);
+	texture.view = createImageView(texture.image, VK_FORMAT_R8G8B8A8_UNORM, VK_IMAGE_ASPECT_COLOR_BIT);
 	texture.sampler = createSampler();
 
 	VkDescriptorSetAllocateInfo alloc{};
@@ -493,6 +512,60 @@ static void destroyTextureResources() {
 	g.defaultTextureIndex = INVALID_TEXTURE_INDEX;
 }
 
+static void destroyDepthResources() {
+	if (!g.device) {
+		g.depthImages.clear();
+		g.depthImageMemory.clear();
+		g.depthImageViews.clear();
+		g.depthFormat = VK_FORMAT_UNDEFINED;
+		return;
+	}
+	for (size_t i = 0; i < g.depthImageViews.size(); ++i) {
+		if (g.depthImageViews[i]) {
+			vkDestroyImageView(g.device, g.depthImageViews[i], nullptr);
+		}
+	}
+	for (size_t i = 0; i < g.depthImages.size(); ++i) {
+		if (g.depthImages[i]) {
+			vkDestroyImage(g.device, g.depthImages[i], nullptr);
+		}
+		if (g.depthImageMemory.size() > i && g.depthImageMemory[i]) {
+			vkFreeMemory(g.device, g.depthImageMemory[i], nullptr);
+		}
+	}
+	g.depthImages.clear();
+	g.depthImageMemory.clear();
+	g.depthImageViews.clear();
+	g.depthFormat = VK_FORMAT_UNDEFINED;
+}
+
+static void createDepthResources() {
+	if (!g.device) return;
+	destroyDepthResources();
+	if (g.builder) {
+		g.depthFormat = g.builder->getDepthFormat();
+	}
+	if (g.depthFormat == VK_FORMAT_UNDEFINED) {
+		g.depthFormat = VK_FORMAT_D32_SFLOAT;
+	}
+	g.depthImages.resize(g.swapchainImages.size(), VK_NULL_HANDLE);
+	g.depthImageMemory.resize(g.swapchainImages.size(), VK_NULL_HANDLE);
+	g.depthImageViews.resize(g.swapchainImages.size(), VK_NULL_HANDLE);
+
+	VkImageAspectFlags aspect = VK_IMAGE_ASPECT_DEPTH_BIT;
+	if (hasStencilComponent(g.depthFormat)) {
+		aspect |= VK_IMAGE_ASPECT_STENCIL_BIT;
+	}
+
+	for (size_t i = 0; i < g.swapchainImages.size(); ++i) {
+		createImage(g.swapchainExtent.width, g.swapchainExtent.height, g.depthFormat,
+			VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT, g.depthImages[i], g.depthImageMemory[i]);
+		transitionImageLayout(g.depthImages[i], g.depthFormat, VK_IMAGE_LAYOUT_UNDEFINED,
+			VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL, aspect);
+		g.depthImageViews[i] = createImageView(g.depthImages[i], g.depthFormat, aspect);
+	}
+}
+
 static size_t getDefaultTextureIndex() {
 	if (g.defaultTextureIndex != INVALID_TEXTURE_INDEX) return g.defaultTextureIndex;
 	Material material;
@@ -560,7 +633,7 @@ static void uploadGpuBuffers(GpuModel& gpuModel) {
 		interleaved.push_back(ny);
 		interleaved.push_back(nz);
 		interleaved.push_back(u);
-		interleaved.push_back(1.0f - v); // Flip V for Vulkan coordinate system
+		interleaved.push_back(v);
 	}
 
 	VkDeviceSize vsize = sizeof(float) * interleaved.size();
@@ -619,6 +692,7 @@ static void buildPipelineWithBuilder() {
 		.setDescriptorSetLayouts(layouts)
 		.buildRenderPass()
 		.buildPipeline();
+	g.depthFormat = g.builder->getDepthFormat();
 	g.renderPass = g.builder->getRenderPass();
 	g.pipelineLayout = g.builder->getPipelineLayout();
 	g.graphicsPipeline = g.builder->getGraphicsPipeline();
@@ -627,11 +701,11 @@ static void buildPipelineWithBuilder() {
 static void createFramebuffers() {
 	g.framebuffers.resize(g.swapchainImageViews.size());
 	for (size_t i = 0; i < g.swapchainImageViews.size(); ++i) {
-		VkImageView attachments[] = { g.swapchainImageViews[i] };
+		VkImageView attachments[] = { g.swapchainImageViews[i], g.depthImageViews[i] };
 		VkFramebufferCreateInfo fci{};
 		fci.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
 		fci.renderPass = g.renderPass;
-		fci.attachmentCount = 1;
+		fci.attachmentCount = 2;
 		fci.pAttachments = attachments;
 		fci.width = g.swapchainExtent.width;
 		fci.height = g.swapchainExtent.height;
@@ -662,16 +736,17 @@ static void recordCommandBuffers() {
 		bi.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
 		check(vkBeginCommandBuffer(g.commandBuffers[i], &bi), "vkBeginCommandBuffer");
 
-		VkClearValue clear{};
-		clear.color = { {0.1f, 0.2f, 0.3f, 1.0f} };
+		VkClearValue clears[2];
+		clears[0].color = { {0.1f, 0.2f, 0.3f, 1.0f} };
+		clears[1].depthStencil = {1.0f, 0};
 		VkRenderPassBeginInfo rpbi{};
 		rpbi.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
 		rpbi.renderPass = g.renderPass;
 		rpbi.framebuffer = g.framebuffers[i];
 		rpbi.renderArea.offset = {0,0};
 		rpbi.renderArea.extent = g.swapchainExtent;
-		rpbi.clearValueCount = 1;
-		rpbi.pClearValues = &clear;
+		rpbi.clearValueCount = 2;
+		rpbi.pClearValues = clears;
 		vkCmdBeginRenderPass(g.commandBuffers[i], &rpbi, VK_SUBPASS_CONTENTS_INLINE);
 		// Apply camera viewport/scissor and draw
 		g.camera.applyToCommandBuffer(g.commandBuffers[i]);
@@ -765,9 +840,10 @@ static void createSyncObjects() {
 
 static void cleanupSwapchain() {
 	destroyAllModelBuffers();
-	g.builder->cleanupSwapchain();
 	for (auto f : g.framebuffers) if (f) vkDestroyFramebuffer(g.device, f, nullptr);
 	g.framebuffers.clear();
+	destroyDepthResources();
+	g.builder->cleanupSwapchain();
 }
 
 static void recreateSwapchain(uint32_t width, uint32_t height) {
@@ -786,6 +862,7 @@ static void recreateSwapchain(uint32_t width, uint32_t height) {
 	for (auto& model : g.models) {
 		uploadGpuBuffers(model);
 	}
+	createDepthResources();
 	createFramebuffers();
 	createCommandPoolBuffers();
 	recordCommandBuffers();
@@ -843,6 +920,7 @@ Java_lt_smworks_multiplatform3dengine_vulkan_EngineAPI_nativeInit(JNIEnv* env, j
 	for (auto& model : g.models) {
 		uploadGpuBuffers(model);
 	}
+	createDepthResources();
 	createFramebuffers();
 	createCommandPoolBuffers();
 	recordCommandBuffers();
@@ -934,16 +1012,17 @@ Java_lt_smworks_multiplatform3dengine_vulkan_EngineAPI_nativeRender(JNIEnv* env,
 	bi.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
 	check(vkBeginCommandBuffer(g.commandBuffers[imageIndex], &bi), "vkBeginCommandBuffer");
 
-	VkClearValue clear{};
-	clear.color = { {0.1f, 0.2f, 0.3f, 1.0f} };
+	VkClearValue clears[2];
+	clears[0].color = { {0.1f, 0.2f, 0.3f, 1.0f} };
+	clears[1].depthStencil = {1.0f, 0};
 	VkRenderPassBeginInfo rpbi{};
 	rpbi.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
 	rpbi.renderPass = g.renderPass;
 	rpbi.framebuffer = g.framebuffers[imageIndex];
 	rpbi.renderArea.offset = {0,0};
 	rpbi.renderArea.extent = g.swapchainExtent;
-	rpbi.clearValueCount = 1;
-	rpbi.pClearValues = &clear;
+	rpbi.clearValueCount = 2;
+	rpbi.pClearValues = clears;
 	vkCmdBeginRenderPass(g.commandBuffers[imageIndex], &rpbi, VK_SUBPASS_CONTENTS_INLINE);
 	
 	// Apply camera viewport/scissor

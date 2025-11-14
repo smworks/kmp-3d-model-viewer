@@ -43,9 +43,12 @@ public:
 	VkRenderPass getRenderPass() const { return renderPass; }
 	VkPipelineLayout getPipelineLayout() const { return pipelineLayout; }
 	VkPipeline getGraphicsPipeline() const { return graphicsPipeline; }
+	VkFormat getDepthFormat() const { return depthFormat; }
 
 private:
 	void check(VkResult r, const char* what);
+	VkFormat findSupportedFormat(const std::vector<VkFormat>& candidates, VkImageTiling tiling, VkFormatFeatureFlags features) const;
+	VkFormat findDepthFormat() const;
 
 	ANativeWindow* window;
 	AAssetManager* assets;
@@ -62,6 +65,7 @@ private:
 	VkExtent2D swapchainExtent{};
 	std::vector<VkImage> swapchainImages;
 	std::vector<VkImageView> swapchainImageViews;
+	VkFormat depthFormat = VK_FORMAT_UNDEFINED;
 
 	VkRenderPass renderPass = VK_NULL_HANDLE;
 	VkPipelineLayout pipelineLayout = VK_NULL_HANDLE;
