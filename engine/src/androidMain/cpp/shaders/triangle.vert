@@ -18,6 +18,7 @@ layout(push_constant) uniform PushConstants {
 	float modelX;
 	float modelY;
 	float modelZ;
+	float modelScale;
 } pc;
 
 mat4 rotationMatrix(vec3 axis, float angle) {
@@ -44,8 +45,9 @@ void main() {
 	mat4 cameraRotation = rotZ * rotX * rotY;
 	mat4 viewRotation = transpose(cameraRotation); // inverse for orthonormal rotation matrix
 
-	// Model position in world space
-	vec4 worldPos = vec4(inPos + vec3(pc.modelX, pc.modelY, pc.modelZ), 1.0);
+	// Model position in world space with uniform scaling
+	vec3 scaledPos = inPos * pc.modelScale;
+	vec4 worldPos = vec4(scaledPos + vec3(pc.modelX, pc.modelY, pc.modelZ), 1.0);
 
 	// Camera positioned along negative Z axis by distance
 	vec3 cameraPos = vec3(0.0, 0.0, -pc.distance);

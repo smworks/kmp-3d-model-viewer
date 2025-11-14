@@ -670,7 +670,7 @@ static void recordCommandBuffers() {
 				continue;
 			}
 
-			float pushConstants[9] = {
+			float pushConstants[10] = {
 				g.camera.getYaw(),
 				g.camera.getPitch(),
 				g.camera.getRoll(),
@@ -679,7 +679,8 @@ static void recordCommandBuffers() {
 				g.camera.getDistance(),
 				model.cpu.position[0],
 				model.cpu.position[1],
-				model.cpu.position[2]
+				model.cpu.position[2],
+				model.cpu.scale
 			};
 			vkCmdPushConstants(g.commandBuffers[i], g.pipelineLayout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(pushConstants), pushConstants);
 
@@ -844,7 +845,7 @@ Java_lt_smworks_multiplatform3dengine_vulkan_EngineAPI_nativeResize(JNIEnv* env,
 }
 
 JNIEXPORT void JNICALL
-Java_lt_smworks_multiplatform3dengine_vulkan_EngineAPI_nativeLoadModel(JNIEnv* env, jobject thiz, jstring modelName, jfloat x, jfloat y, jfloat z) {
+Java_lt_smworks_multiplatform3dengine_vulkan_EngineAPI_nativeLoadModel(JNIEnv* env, jobject thiz, jstring modelName, jfloat x, jfloat y, jfloat z, jfloat scale) {
 	std::lock_guard<std::mutex> guard(g_stateMutex);
 	const char* modelChars = modelName ? env->GetStringUTFChars(modelName, nullptr) : nullptr;
 	std::string modelPath = modelChars ? std::string(modelChars) : std::string();
@@ -857,8 +858,10 @@ Java_lt_smworks_multiplatform3dengine_vulkan_EngineAPI_nativeLoadModel(JNIEnv* e
 		return;
 	}
 
+	float appliedScale = scale > 0.0f ? static_cast<float>(scale) : 1.0f;
 	Model newModel = loadModel(g.assetManager, modelPath);
 	newModel.setPosition(static_cast<float>(x), static_cast<float>(y), static_cast<float>(z));
+	newModel.setScale(appliedScale);
 
 	if (!newModel.hasGeometry()) {
 		LOGE("Model %s has no geometry and will be skipped", modelPath.c_str());
@@ -923,7 +926,7 @@ Java_lt_smworks_multiplatform3dengine_vulkan_EngineAPI_nativeRender(JNIEnv* env,
 			continue;
 		}
 
-		float pushConstants[9] = {
+		float pushConstants[10] = {
 			g.camera.getYaw(),
 			g.camera.getPitch(),
 			g.camera.getRoll(),
@@ -932,7 +935,8 @@ Java_lt_smworks_multiplatform3dengine_vulkan_EngineAPI_nativeRender(JNIEnv* env,
 			g.camera.getDistance(),
 			model.cpu.position[0],
 			model.cpu.position[1],
-			model.cpu.position[2]
+			model.cpu.position[2],
+			model.cpu.scale
 		};
 		vkCmdPushConstants(g.commandBuffers[imageIndex], g.pipelineLayout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(pushConstants), pushConstants);
 

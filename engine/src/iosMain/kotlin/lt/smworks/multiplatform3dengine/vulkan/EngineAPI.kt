@@ -1,7 +1,7 @@
 package lt.smworks.multiplatform3dengine.vulkan
 
 actual class EngineAPI actual constructor() {
-    actual fun loadModel(modelName: String, x: Float, y: Float, z: Float) {
+    actual fun loadModel(modelName: String, x: Float, y: Float, z: Float, scale: Float) {
         // No-op on iOS until native renderer is implemented.
     }
 

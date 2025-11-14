@@ -13,7 +13,7 @@ actual class EngineAPI actual constructor() {
     private var thread: Thread? = null
     private var isNativeReady = false
 
-    private data class ModelState(val name: String, val x: Float, val y: Float, val z: Float)
+    private data class ModelState(val name: String, val x: Float, val y: Float, val z: Float, val scale: Float)
     private val modelStates = mutableListOf<ModelState>()
     private var accumulatedCameraDistance = 0f
     private var accumulatedYaw = 0f
@@ -59,10 +59,10 @@ actual class EngineAPI actual constructor() {
         }
     }
 
-    actual fun loadModel(modelName: String, x: Float, y: Float, z: Float) {
-        modelStates.add(ModelState(modelName, x, y, z))
+    actual fun loadModel(modelName: String, x: Float, y: Float, z: Float, scale: Float) {
+        modelStates.add(ModelState(modelName, x, y, z, scale))
         if (isNativeReady) {
-            nativeLoadModel(modelName, x, y, z)
+            nativeLoadModel(modelName, x, y, z, scale)
         }
     }
 
@@ -87,7 +87,7 @@ actual class EngineAPI actual constructor() {
 
     private fun restoreSceneState() {
         modelStates.forEach { state ->
-            nativeLoadModel(state.name, state.x, state.y, state.z)
+            nativeLoadModel(state.name, state.x, state.y, state.z, state.scale)
         }
         if (accumulatedCameraDistance != 0f) {
             nativeMoveCamera(accumulatedCameraDistance)
@@ -102,7 +102,7 @@ actual class EngineAPI actual constructor() {
     private external fun nativeRender()
     private external fun nativeRotateCamera(yaw: Float, pitch: Float, roll: Float)
     private external fun nativeDestroy()
-    private external fun nativeLoadModel(modelName: String, x: Float, y: Float, z: Float)
+    private external fun nativeLoadModel(modelName: String, x: Float, y: Float, z: Float, scale: Float)
     private external fun nativeMoveCamera(delta: Float)
 
     companion object {
