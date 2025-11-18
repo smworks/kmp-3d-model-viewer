@@ -69,6 +69,15 @@ in your IDE's toolbar or run it directly from the terminal:
 To build and run the development version of the iOS app, use the run configuration from the run widget
 in your IDE’s toolbar or open the [/iosApp](./iosApp) directory in Xcode and run it from there.
 
+## Development Guidelines
+
+- Prefer simple, easy-to-read implementations over clever or overly optimized ones.
+- Avoid comments unless they are extremely necessary; rely on self-explanatory code.
+- Use Hungarian notation for all C++ code in this repository.
+- Follow Kotlin's official coding conventions for Kotlin sources.
+
+Refer to [`AGENTS.md`](./AGENTS.md) for the canonical set of agent instructions.
+
 ---
 
 Learn more about [Kotlin Multiplatform](https://www.jetbrains.com/help/kotlin-multiplatform-dev/get-started.html),
