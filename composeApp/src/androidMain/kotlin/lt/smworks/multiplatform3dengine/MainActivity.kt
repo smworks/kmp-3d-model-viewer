@@ -55,6 +55,7 @@ fun AndroidSample() {
             LaunchedEffect(Unit) {
                 engine.moveCamera(-1.1f)
                 val modelPath = "models/cube-tex.obj"
+//                engine.loadModel(modelPath, 1f, 0f, 0f, 1f)
                 val modelId = engine.loadModel(modelPath, 0f, 0f, 0f, 1f)
                 modelIdState.value = modelId
             }
