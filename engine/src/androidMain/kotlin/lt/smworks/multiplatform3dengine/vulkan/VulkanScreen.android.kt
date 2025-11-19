@@ -6,10 +6,16 @@ import android.view.SurfaceView
 import android.view.MotionEvent
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.viewinterop.AndroidView
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
 import kotlin.math.abs
+import kotlin.math.PI
 
 actual typealias VulkanRenderTarget = Surface
 
@@ -140,4 +146,111 @@ fun rememberEngineApi(): EngineAPI {
 	}
 
 	return engine
+}
+
+@Composable
+fun rememberEngineScene(
+    block: EngineSceneBuilder.() -> Unit
+): EngineSceneState {
+    val sceneSpec = engineScene(block)
+    return rememberEngineScene(sceneSpec)
+}
+
+@Composable
+fun rememberEngineScene(
+    sceneSpec: EngineSceneSpec
+): EngineSceneState {
+    val engine = rememberEngineApi()
+    val fpsState = remember { rememberFpsState() }
+    val loadedModels = remember(engine) { mutableMapOf<EngineModelSpec, Long>() }
+    val rotationJobs = remember(engine) { mutableMapOf<EngineModelSpec, Job>() }
+
+    LaunchedEffect(engine, sceneSpec.cameraDistance) {
+        if (sceneSpec.cameraDistance != 0f) {
+            engine.moveCamera(sceneSpec.cameraDistance)
+        }
+    }
+
+    LaunchedEffect(engine, sceneSpec.models) {
+        val fullRotation = (PI * 2f).toFloat()
+        val activeSpecs = sceneSpec.models.toSet()
+
+        val staleSpecs = rotationJobs.keys - activeSpecs
+        staleSpecs.forEach { spec ->
+            rotationJobs.remove(spec)?.cancel()
+        }
+
+        loadedModels.keys.retainAll(activeSpecs)
+
+        sceneSpec.models.forEach { spec ->
+            val translation = spec.translation
+            val modelId = loadedModels.getOrPut(spec) {
+                engine.loadModel(
+                    spec.assetPath,
+                    translation.x,
+                    translation.y,
+                    translation.z,
+                    spec.scale
+                )
+            }
+
+            val autoRotate = spec.autoRotate
+            if (autoRotate != null) {
+                val currentJob = rotationJobs[spec]
+                if (currentJob == null || !currentJob.isActive) {
+                    rotationJobs[spec] = launch {
+                        var rotationX = 0f
+                        var rotationY = 0f
+                        var rotationZ = 0f
+
+                        val hasRotation = autoRotate.speedX != 0f ||
+                            autoRotate.speedY != 0f ||
+                            autoRotate.speedZ != 0f
+
+                        if (!hasRotation) return@launch
+
+                        while (isActive) {
+                            rotationX = advanceRotation(rotationX, autoRotate.speedX, fullRotation)
+                            rotationY = advanceRotation(rotationY, autoRotate.speedY, fullRotation)
+                            rotationZ = advanceRotation(rotationZ, autoRotate.speedZ, fullRotation)
+
+                            engine.rotate(modelId, rotationX, rotationY, rotationZ)
+                            delay(autoRotate.intervalMs)
+                        }
+                    }
+                }
+            } else {
+                rotationJobs.remove(spec)?.cancel()
+            }
+        }
+    }
+
+    LaunchedEffect(engine, sceneSpec.fpsSamplePeriodMs) {
+        while (isActive) {
+            fpsState.value = engine.getFps()
+            delay(sceneSpec.fpsSamplePeriodMs)
+        }
+    }
+
+    return remember(engine) {
+        EngineSceneState(
+            engine = engine,
+            fpsState = fpsState
+        )
+    }
+}
+
+private fun advanceRotation(current: Float, delta: Float, fullRotation: Float): Float {
+    if (delta == 0f) {
+        return current
+    }
+
+    var result = current + delta
+    if (result > fullRotation) {
+        result -= fullRotation
+    } else if (result < -fullRotation) {
+        result += fullRotation
+    }
+
+    return result
 }

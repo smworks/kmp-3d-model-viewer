@@ -11,11 +11,8 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.setValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.graphics.Color
@@ -25,9 +22,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.unit.dp
 import lt.smworks.multiplatform3dengine.vulkan.VulkanScreen
 import lt.smworks.multiplatform3dengine.vulkan.VulkanSupport
-import lt.smworks.multiplatform3dengine.vulkan.rememberEngineApi
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.isActive
+import lt.smworks.multiplatform3dengine.vulkan.rememberEngineScene
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -46,51 +41,25 @@ fun AndroidSample() {
         val context = LocalContext.current
         val supported = remember { VulkanSupport.isSupported(context) }
 
-
         if (supported) {
-            val engine = rememberEngineApi()
-            val modelIdState = remember { mutableStateOf<Long?>(null) }
-            var fps by remember { mutableStateOf(0) }
-
-            LaunchedEffect(Unit) {
-                engine.moveCamera(-1.1f)
-                val modelPath = "models/cube-tex.obj"
-//                engine.loadModel(modelPath, 1f, 0f, 0f, 1f)
-                val modelId = engine.loadModel(modelPath, 0f, 0f, 0f, 1f)
-                modelIdState.value = modelId
-            }
-
-            LaunchedEffect(modelIdState.value) {
-                val modelId = modelIdState.value ?: return@LaunchedEffect
-                var angle = 0f
-                val fullRotation = (Math.PI * 2).toFloat()
-                while (isActive) {
-                    engine.rotate(modelId, angle / 2, angle, 0f)
-                    angle += 0.01f
-                    if (angle > fullRotation) {
-                        angle -= fullRotation
-                    }
-                    delay(16L)
+            val sceneState = rememberEngineScene {
+                cameraDistance = -1.1f
+                model("models/cube-tex.obj") {
+                    autoRotate(speedX = 0.005f, speedY = 0.01f)
                 }
             }
-
-            LaunchedEffect(engine) {
-                while (isActive) {
-                    fps = engine.getFps()
-                    delay(250L)
-                }
-            }
+            val fps by sceneState.fps
 
             Box(
                 modifier = Modifier.fillMaxSize()
             ) {
                 VulkanScreen(
                     modifier = Modifier.fillMaxSize(),
-                    engine = engine
+                    engine = sceneState.engine
                 )
 
                 Text(
-                    text = "${fps} FPS",
+                    text = "$fps FPS",
                     modifier = Modifier
                         .align(Alignment.TopEnd)
                         .padding(16.dp)
