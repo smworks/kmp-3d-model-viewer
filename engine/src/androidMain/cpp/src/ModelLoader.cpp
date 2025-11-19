@@ -92,12 +92,6 @@ std::string joinPaths(const std::string& dir, const std::string& file) {
 	return dir + "/" + file;
 }
 
-std::string fileNameFrom(const std::string& path) {
-	const auto pos = path.find_last_of("/\\");
-	if (pos == std::string::npos) return path;
-	return path.substr(pos + 1);
-}
-
 bool parseInt(const std::string& text, int& value) {
 	if (text.empty()) return false;
 	char* end = nullptr;
@@ -168,6 +162,97 @@ uint16_t ensureMaterial(Model& model, const std::string& name, std::unordered_ma
 	return index;
 }
 
+std::string resolveMapPath(const std::string& baseDir, const std::string& spec) {
+	std::string trimmed = trim(spec);
+	if (trimmed.empty()) return {};
+
+	std::vector<std::string> tokens;
+	tokens.reserve(8);
+
+	std::string current;
+	bool inQuotes = false;
+	char quoteChar = '\0';
+
+	auto flushToken = [&]() {
+		if (!current.empty()) {
+			tokens.push_back(current);
+			current.clear();
+		}
+	};
+
+	for (char ch : trimmed) {
+		if (inQuotes) {
+			if (ch == quoteChar) {
+				inQuotes = false;
+				flushToken();
+			} else {
+				current.push_back(ch);
+			}
+		} else {
+			if (ch == '"' || ch == '\'') {
+				flushToken();
+				inQuotes = true;
+				quoteChar = ch;
+			} else if (std::isspace(static_cast<unsigned char>(ch)) != 0) {
+				flushToken();
+			} else {
+				current.push_back(ch);
+			}
+		}
+	}
+	flushToken();
+
+	auto isLikelyPath = [](const std::string& value) {
+		return value.find('/') != std::string::npos ||
+			value.find('\\') != std::string::npos ||
+			value.find('.') != std::string::npos;
+	};
+
+	std::string candidate;
+	for (auto it = tokens.rbegin(); it != tokens.rend(); ++it) {
+		const std::string& value = *it;
+		if (value.empty()) {
+			continue;
+		}
+		if (value[0] == '-') {
+			continue;
+		}
+		if (!candidate.empty() && !isLikelyPath(value)) {
+			continue;
+		}
+		if (isLikelyPath(value) || candidate.empty()) {
+			candidate = value;
+			if (isLikelyPath(value)) {
+				break;
+			}
+		}
+	}
+
+	if (candidate.empty() && !tokens.empty()) {
+		candidate = tokens.back();
+	}
+
+	candidate = trim(candidate);
+	if (candidate.empty()) return {};
+
+	std::replace(candidate.begin(), candidate.end(), '\\', '/');
+	while (candidate.compare(0, 2, "./") == 0) {
+		candidate.erase(0, 2);
+	}
+	if (!candidate.empty() && candidate.front() == '/') {
+		candidate.erase(candidate.begin());
+	}
+
+	if (!baseDir.empty()) {
+		const std::string prefix = baseDir + "/";
+		if (candidate.rfind(prefix, 0) == 0) {
+			return candidate;
+		}
+	}
+
+	return joinPaths(baseDir, candidate);
+}
+
 void parseMtlContents(const std::string& mtlText, const std::string& baseDir, Model& model, std::unordered_map<std::string, uint16_t>& materialLookup) {
 	if (mtlText.empty()) return;
 
@@ -209,9 +294,11 @@ void parseMtlContents(const std::string& mtlText, const std::string& baseDir, Mo
 		} else if (keyword == "Kd" && hasMaterial) {
 			std::istringstream kdStream(remainder);
 			kdStream >> currentMaterial.diffuseColor[0] >> currentMaterial.diffuseColor[1] >> currentMaterial.diffuseColor[2];
-		} else if (keyword == "map_Kd" && hasMaterial) {
-			const std::string fileName = fileNameFrom(remainder);
-			currentMaterial.diffuseTexture = joinPaths(baseDir, fileName);
+		} else if ((keyword == "map_Kd" || keyword == "map_Ka") && hasMaterial) {
+			const std::string texturePath = resolveMapPath(baseDir, remainder);
+			if (!texturePath.empty()) {
+				currentMaterial.diffuseTexture = texturePath;
+			}
 		}
 	}
 
