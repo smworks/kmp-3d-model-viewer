@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cmath>
 #include <cctype>
 #include <cstdint>
 #include <cstdlib>
@@ -21,6 +22,7 @@
 
 #define LOG_TAG "ModelLoader"
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO, LOG_TAG, __VA_ARGS__)
+#define LOGW(...) __android_log_print(ANDROID_LOG_WARN, LOG_TAG, __VA_ARGS__)
 #define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, LOG_TAG, __VA_ARGS__)
 
 namespace {
@@ -100,6 +102,7 @@ std::string joinPaths(const std::string& dir, const std::string& file) {
 std::string resolveAssetUri(const std::string& strBasePath, std::string strUri) {
 	if (strUri.empty()) return {};
 	if (strUri.compare(0, 5, "data:") == 0) {
+		LOGW("resolveAssetUri: data URI resources are not supported (base '%s')", strBasePath.c_str());
 		return {};
 	}
 	strUri = trim(strUri);
@@ -121,7 +124,99 @@ std::string resolveAssetUri(const std::string& strBasePath, std::string strUri) 
 		}
 	}
 	std::replace(strUri.begin(), strUri.end(), '\\', '/');
+	if (strUri.empty()) {
+		LOGW("resolveAssetUri: resolved empty path (base '%s')", strBasePath.c_str());
+	}
 	return strUri;
+}
+
+void setIdentityMatrix3(float* pMatrix) {
+	pMatrix[0] = 1.0f; pMatrix[1] = 0.0f; pMatrix[2] = 0.0f;
+	pMatrix[3] = 0.0f; pMatrix[4] = 1.0f; pMatrix[5] = 0.0f;
+	pMatrix[6] = 0.0f; pMatrix[7] = 0.0f; pMatrix[8] = 1.0f;
+}
+
+void applyMatrixToPoint(const float* pMatrix, const float* pPoint, float* pOut) {
+	if (!pMatrix) {
+		pOut[0] = pPoint[0];
+		pOut[1] = pPoint[1];
+		pOut[2] = pPoint[2];
+		return;
+	}
+	pOut[0] = pMatrix[0] * pPoint[0] + pMatrix[4] * pPoint[1] + pMatrix[8] * pPoint[2] + pMatrix[12];
+	pOut[1] = pMatrix[1] * pPoint[0] + pMatrix[5] * pPoint[1] + pMatrix[9] * pPoint[2] + pMatrix[13];
+	pOut[2] = pMatrix[2] * pPoint[0] + pMatrix[6] * pPoint[1] + pMatrix[10] * pPoint[2] + pMatrix[14];
+}
+
+void applyMatrixToVector(const float* pMatrix3, const float* pVector, float* pOut) {
+	if (!pMatrix3) {
+		pOut[0] = pVector[0];
+		pOut[1] = pVector[1];
+		pOut[2] = pVector[2];
+		return;
+	}
+	pOut[0] = pMatrix3[0] * pVector[0] + pMatrix3[3] * pVector[1] + pMatrix3[6] * pVector[2];
+	pOut[1] = pMatrix3[1] * pVector[0] + pMatrix3[4] * pVector[1] + pMatrix3[7] * pVector[2];
+	pOut[2] = pMatrix3[2] * pVector[0] + pMatrix3[5] * pVector[1] + pMatrix3[8] * pVector[2];
+}
+
+void normalizeVector3(float* pVector) {
+	const float fLengthSq = pVector[0] * pVector[0] + pVector[1] * pVector[1] + pVector[2] * pVector[2];
+	if (fLengthSq <= 0.0f) {
+		pVector[0] = 0.0f;
+		pVector[1] = 0.0f;
+		pVector[2] = 0.0f;
+		return;
+	}
+	const float fInvLength = 1.0f / std::sqrt(fLengthSq);
+	pVector[0] *= fInvLength;
+	pVector[1] *= fInvLength;
+	pVector[2] *= fInvLength;
+}
+
+void computeNormalMatrix(const float* pWorldMatrix, float* pNormalMatrix) {
+	if (!pWorldMatrix) {
+		setIdentityMatrix3(pNormalMatrix);
+		return;
+	}
+
+	const float a = pWorldMatrix[0];
+	const float b = pWorldMatrix[4];
+	const float c = pWorldMatrix[8];
+	const float d = pWorldMatrix[1];
+	const float e = pWorldMatrix[5];
+	const float f = pWorldMatrix[9];
+	const float g = pWorldMatrix[2];
+	const float h = pWorldMatrix[6];
+	const float i = pWorldMatrix[10];
+
+	const float det = a * (e * i - f * h) - b * (d * i - f * g) + c * (d * h - e * g);
+	if (std::fabs(det) <= 1e-8f) {
+		setIdentityMatrix3(pNormalMatrix);
+		return;
+	}
+
+	const float invDet = 1.0f / det;
+	float inverseRowMajor[9];
+	inverseRowMajor[0] = (e * i - f * h) * invDet;
+	inverseRowMajor[1] = (c * h - b * i) * invDet;
+	inverseRowMajor[2] = (b * f - c * e) * invDet;
+	inverseRowMajor[3] = (f * g - d * i) * invDet;
+	inverseRowMajor[4] = (a * i - c * g) * invDet;
+	inverseRowMajor[5] = (c * d - a * f) * invDet;
+	inverseRowMajor[6] = (d * h - e * g) * invDet;
+	inverseRowMajor[7] = (b * g - a * h) * invDet;
+	inverseRowMajor[8] = (a * e - b * d) * invDet;
+
+	pNormalMatrix[0] = inverseRowMajor[0];
+	pNormalMatrix[1] = inverseRowMajor[3];
+	pNormalMatrix[2] = inverseRowMajor[6];
+	pNormalMatrix[3] = inverseRowMajor[1];
+	pNormalMatrix[4] = inverseRowMajor[4];
+	pNormalMatrix[5] = inverseRowMajor[7];
+	pNormalMatrix[6] = inverseRowMajor[2];
+	pNormalMatrix[7] = inverseRowMajor[5];
+	pNormalMatrix[8] = inverseRowMajor[8];
 }
 
 bool parseInt(const std::string& text, int& value) {
@@ -399,6 +494,164 @@ struct SCgltfDeleter {
 	}
 };
 
+void processGltfPrimitive(const cgltf_primitive& sPrimitive,
+	const float* pWorldMatrix,
+	const float* pNormalMatrix,
+	Model& sModel,
+	std::unordered_map<const cgltf_material*, uint16_t>& mapMaterialByPointer,
+	std::unordered_map<std::string, uint16_t>& mapMaterialByName,
+	const std::string& strModelName) {
+	if (sPrimitive.type != cgltf_primitive_type_triangles) {
+		LOGE("Unsupported primitive type %d in glTF model %s", static_cast<int>(sPrimitive.type), strModelName.c_str());
+		return;
+	}
+
+	const cgltf_accessor* pPositionAccessor = nullptr;
+	const cgltf_accessor* pNormalAccessor = nullptr;
+	const cgltf_accessor* pTexcoordAccessor = nullptr;
+
+	for (cgltf_size uAttributeIndex = 0; uAttributeIndex < sPrimitive.attributes_count; ++uAttributeIndex) {
+		const cgltf_attribute& sAttribute = sPrimitive.attributes[uAttributeIndex];
+		if (sAttribute.type == cgltf_attribute_type_position) {
+			pPositionAccessor = sAttribute.data;
+		} else if (sAttribute.type == cgltf_attribute_type_normal) {
+			pNormalAccessor = sAttribute.data;
+		} else if (sAttribute.type == cgltf_attribute_type_texcoord && sAttribute.index == 0) {
+			pTexcoordAccessor = sAttribute.data;
+		}
+	}
+
+	if (!pPositionAccessor || pPositionAccessor->count == 0) {
+		LOGE("glTF primitive missing positions in %s", strModelName.c_str());
+		return;
+	}
+
+	const cgltf_size uVertexCount = pPositionAccessor->count;
+	const uint32_t uVertexBase = static_cast<uint32_t>(sModel.vertexCount());
+
+	sModel.positions.reserve(sModel.positions.size() + static_cast<size_t>(uVertexCount) * 3);
+	sModel.normals.reserve(sModel.normals.size() + static_cast<size_t>(uVertexCount) * 3);
+	sModel.texcoords.reserve(sModel.texcoords.size() + static_cast<size_t>(uVertexCount) * 2);
+
+	for (cgltf_size uVertexIndex = 0; uVertexIndex < uVertexCount; ++uVertexIndex) {
+		float afPosition[3] = {0.0f, 0.0f, 0.0f};
+		cgltf_accessor_read_float(pPositionAccessor, uVertexIndex, afPosition, 3);
+
+		float afTransformedPosition[3];
+		applyMatrixToPoint(pWorldMatrix, afPosition, afTransformedPosition);
+		sModel.positions.push_back(afTransformedPosition[0]);
+		sModel.positions.push_back(afTransformedPosition[1]);
+		sModel.positions.push_back(afTransformedPosition[2]);
+
+		if (pNormalAccessor) {
+			float afNormal[3] = {0.0f, 0.0f, 0.0f};
+			if (cgltf_accessor_read_float(pNormalAccessor, uVertexIndex, afNormal, 3)) {
+				float afTransformedNormal[3];
+				applyMatrixToVector(pNormalMatrix, afNormal, afTransformedNormal);
+				normalizeVector3(afTransformedNormal);
+				sModel.normals.push_back(afTransformedNormal[0]);
+				sModel.normals.push_back(afTransformedNormal[1]);
+				sModel.normals.push_back(afTransformedNormal[2]);
+			} else {
+				sModel.normals.insert(sModel.normals.end(), {0.0f, 0.0f, 0.0f});
+			}
+		} else {
+			sModel.normals.insert(sModel.normals.end(), {0.0f, 0.0f, 0.0f});
+		}
+
+		if (pTexcoordAccessor) {
+			float afTexcoord[2] = {0.0f, 0.0f};
+			if (cgltf_accessor_read_float(pTexcoordAccessor, uVertexIndex, afTexcoord, 2)) {
+				sModel.texcoords.push_back(afTexcoord[0]);
+				sModel.texcoords.push_back(afTexcoord[1]);
+			} else {
+				sModel.texcoords.insert(sModel.texcoords.end(), {0.0f, 0.0f});
+			}
+		} else {
+			sModel.texcoords.insert(sModel.texcoords.end(), {0.0f, 0.0f});
+		}
+	}
+
+	const cgltf_accessor* pIndicesAccessor = sPrimitive.indices;
+	const cgltf_size uIndexCount = pIndicesAccessor ? pIndicesAccessor->count : uVertexCount;
+	if (uIndexCount == 0) {
+		return;
+	}
+
+	sModel.indices.reserve(sModel.indices.size() + static_cast<size_t>(uIndexCount));
+
+	const uint32_t uIndexOffset = static_cast<uint32_t>(sModel.indices.size());
+	if (pIndicesAccessor) {
+		for (cgltf_size uIndex = 0; uIndex < uIndexCount; ++uIndex) {
+			const cgltf_size uValue = cgltf_accessor_read_index(pIndicesAccessor, uIndex);
+			sModel.indices.push_back(uVertexBase + static_cast<uint32_t>(uValue));
+		}
+	} else {
+		for (cgltf_size uIndex = 0; uIndex < uVertexCount; ++uIndex) {
+			sModel.indices.push_back(uVertexBase + static_cast<uint32_t>(uIndex));
+		}
+	}
+
+	uint16_t uMaterialIndex = 0;
+	if (sPrimitive.material) {
+		auto itMaterial = mapMaterialByPointer.find(sPrimitive.material);
+		if (itMaterial != mapMaterialByPointer.end()) {
+			uMaterialIndex = itMaterial->second;
+		} else {
+			std::string strGeneratedName;
+			if (sPrimitive.material->name && sPrimitive.material->name[0] != '\0') {
+				strGeneratedName = sPrimitive.material->name;
+			} else {
+				strGeneratedName = "Material";
+			}
+			uMaterialIndex = ensureMaterial(sModel, strGeneratedName, mapMaterialByName);
+		}
+	}
+
+	Model::Subset sSubset;
+	sSubset.indexOffset = uIndexOffset;
+	sSubset.indexCount = static_cast<uint32_t>(sModel.indices.size()) - uIndexOffset;
+	sSubset.materialIndex = uMaterialIndex;
+
+	if (!sModel.subsets.empty()) {
+		Model::Subset& sLastSubset = sModel.subsets.back();
+		if (sLastSubset.materialIndex == sSubset.materialIndex &&
+			sLastSubset.indexOffset + sLastSubset.indexCount == sSubset.indexOffset) {
+			sLastSubset.indexCount += sSubset.indexCount;
+			return;
+		}
+	}
+
+	sModel.subsets.push_back(sSubset);
+}
+
+void processGltfNodeTree(const cgltf_node* pNode,
+	Model& sModel,
+	std::unordered_map<const cgltf_material*, uint16_t>& mapMaterialByPointer,
+	std::unordered_map<std::string, uint16_t>& mapMaterialByName,
+	const std::string& strModelName) {
+	if (!pNode) {
+		return;
+	}
+
+	cgltf_float afWorld[16];
+	cgltf_node_transform_world(pNode, afWorld);
+	float afNormal[9];
+	computeNormalMatrix(afWorld, afNormal);
+
+	if (pNode->mesh) {
+		const cgltf_mesh& sMesh = *pNode->mesh;
+		for (cgltf_size uPrimitiveIndex = 0; uPrimitiveIndex < sMesh.primitives_count; ++uPrimitiveIndex) {
+			const cgltf_primitive& sPrimitive = sMesh.primitives[uPrimitiveIndex];
+			processGltfPrimitive(sPrimitive, afWorld, afNormal, sModel, mapMaterialByPointer, mapMaterialByName, strModelName);
+		}
+	}
+
+	for (cgltf_size uChildIndex = 0; uChildIndex < pNode->children_count; ++uChildIndex) {
+		processGltfNodeTree(pNode->children[uChildIndex], sModel, mapMaterialByPointer, mapMaterialByName, strModelName);
+	}
+}
+
 } // namespace
 
 static Model loadObjModelInternal(AAssetManager* assetManager, const std::string& modelName) {
@@ -627,6 +880,7 @@ static Model loadGltfModelInternal(AAssetManager* pAssetManager, const std::stri
 	std::unordered_map<const cgltf_material*, uint16_t> mapMaterialByPointer;
 	std::unordered_map<std::string, uint16_t> mapMaterialByName;
 
+	uint32_t uMaterialsWithTexture = 0;
 	if (pData->materials_count > 0) {
 		mapMaterialByPointer.reserve(pData->materials_count);
 		mapMaterialByName.reserve(pData->materials_count);
@@ -650,7 +904,48 @@ static Model loadGltfModelInternal(AAssetManager* pAssetManager, const std::stri
 						const std::string strTexturePath = resolveAssetUri(strBaseDir, pImage->uri);
 						if (!strTexturePath.empty()) {
 							sMappedMaterial.diffuseTexture = strTexturePath;
+							LOGI("Material '%s' base color texture resolved to '%s'",
+								sMappedMaterial.name.c_str(),
+								sMappedMaterial.diffuseTexture.c_str());
+							++uMaterialsWithTexture;
+						} else {
+							LOGW("Material '%s' base color texture URI '%s' could not be resolved relative to '%s'",
+								sMappedMaterial.name.c_str(),
+								pImage->uri,
+								strBaseDir.c_str());
 						}
+					} else if (pImage->buffer_view) {
+						LOGW("Material '%s' base color texture is embedded via buffer_view; embedded images are not supported",
+							sMappedMaterial.name.c_str());
+					} else {
+						LOGW("Material '%s' base color texture has no URI", sMappedMaterial.name.c_str());
+					}
+				}
+			}
+			if (sMappedMaterial.diffuseTexture.empty() && sSourceMaterial.has_pbr_specular_glossiness) {
+				const cgltf_pbr_specular_glossiness& sSpecGloss = sSourceMaterial.pbr_specular_glossiness;
+				const cgltf_texture_view& sDiffuseTexture = sSpecGloss.diffuse_texture;
+				if (sDiffuseTexture.texture && sDiffuseTexture.texture->image) {
+					const cgltf_image* pImage = sDiffuseTexture.texture->image;
+					if (pImage->uri && pImage->uri[0] != '\0') {
+						const std::string strTexturePath = resolveAssetUri(strBaseDir, pImage->uri);
+						if (!strTexturePath.empty()) {
+							sMappedMaterial.diffuseTexture = strTexturePath;
+							LOGI("Material '%s' specGloss diffuse texture resolved to '%s'",
+								sMappedMaterial.name.c_str(),
+								sMappedMaterial.diffuseTexture.c_str());
+							++uMaterialsWithTexture;
+						} else {
+							LOGW("Material '%s' specGloss diffuse texture URI '%s' could not be resolved relative to '%s'",
+								sMappedMaterial.name.c_str(),
+								pImage->uri,
+								strBaseDir.c_str());
+						}
+					} else if (pImage->buffer_view) {
+						LOGW("Material '%s' specGloss diffuse texture is embedded via buffer_view; embedded images are not supported",
+							sMappedMaterial.name.c_str());
+					} else {
+						LOGW("Material '%s' specGloss diffuse texture has no URI", sMappedMaterial.name.c_str());
 					}
 				}
 			}
@@ -660,6 +955,10 @@ static Model loadGltfModelInternal(AAssetManager* pAssetManager, const std::stri
 			mapMaterialByName[sMappedMaterial.name] = uMaterialSlot;
 		}
 	}
+	LOGI("Loaded %zu glTF materials (%u with textures) from %s",
+		sModel.materials.size(),
+		uMaterialsWithTexture,
+		strModelName.c_str());
 
 	if (sModel.materials.empty()) {
 		Material sDefaultMaterial;
@@ -670,126 +969,29 @@ static Model loadGltfModelInternal(AAssetManager* pAssetManager, const std::stri
 
 	sModel.subsets.clear();
 
-	for (cgltf_size uMeshIndex = 0; uMeshIndex < pData->meshes_count; ++uMeshIndex) {
-		const cgltf_mesh& sMesh = pData->meshes[uMeshIndex];
-		for (cgltf_size uPrimitiveIndex = 0; uPrimitiveIndex < sMesh.primitives_count; ++uPrimitiveIndex) {
-			const cgltf_primitive& sPrimitive = sMesh.primitives[uPrimitiveIndex];
-			if (sPrimitive.type != cgltf_primitive_type_triangles) {
-				LOGE("Unsupported primitive type %d in glTF model %s", static_cast<int>(sPrimitive.type), strModelName.c_str());
-				continue;
+	bool bProcessedGeometry = false;
+
+	const cgltf_scene* pScene = pData->scene ? pData->scene : (pData->scenes_count > 0 ? &pData->scenes[0] : nullptr);
+	if (pScene && pScene->nodes_count > 0) {
+		for (cgltf_size uNodeIndex = 0; uNodeIndex < pScene->nodes_count; ++uNodeIndex) {
+			processGltfNodeTree(pScene->nodes[uNodeIndex], sModel, mapMaterialByPointer, mapMaterialByName, strModelName);
+		}
+		bProcessedGeometry = true;
+	} else if (pData->nodes_count > 0) {
+		for (cgltf_size uNodeIndex = 0; uNodeIndex < pData->nodes_count; ++uNodeIndex) {
+			processGltfNodeTree(&pData->nodes[uNodeIndex], sModel, mapMaterialByPointer, mapMaterialByName, strModelName);
+		}
+		bProcessedGeometry = true;
+	}
+
+	if (!bProcessedGeometry) {
+		LOGW("Model %s has no scene graph; falling back to mesh-local geometry without transforms", strModelName.c_str());
+		for (cgltf_size uMeshIndex = 0; uMeshIndex < pData->meshes_count; ++uMeshIndex) {
+			const cgltf_mesh& sMesh = pData->meshes[uMeshIndex];
+			for (cgltf_size uPrimitiveIndex = 0; uPrimitiveIndex < sMesh.primitives_count; ++uPrimitiveIndex) {
+				const cgltf_primitive& sPrimitive = sMesh.primitives[uPrimitiveIndex];
+				processGltfPrimitive(sPrimitive, nullptr, nullptr, sModel, mapMaterialByPointer, mapMaterialByName, strModelName);
 			}
-
-			const cgltf_accessor* pPositionAccessor = nullptr;
-			const cgltf_accessor* pNormalAccessor = nullptr;
-			const cgltf_accessor* pTexcoordAccessor = nullptr;
-
-			for (cgltf_size uAttributeIndex = 0; uAttributeIndex < sPrimitive.attributes_count; ++uAttributeIndex) {
-				const cgltf_attribute& sAttribute = sPrimitive.attributes[uAttributeIndex];
-				if (sAttribute.type == cgltf_attribute_type_position) {
-					pPositionAccessor = sAttribute.data;
-				} else if (sAttribute.type == cgltf_attribute_type_normal) {
-					pNormalAccessor = sAttribute.data;
-				} else if (sAttribute.type == cgltf_attribute_type_texcoord && sAttribute.index == 0) {
-					pTexcoordAccessor = sAttribute.data;
-				}
-			}
-
-			if (!pPositionAccessor || pPositionAccessor->count == 0) {
-				LOGE("glTF primitive missing positions in %s", strModelName.c_str());
-				continue;
-			}
-
-			const cgltf_size uVertexCount = pPositionAccessor->count;
-			const uint32_t uVertexBase = static_cast<uint32_t>(sModel.vertexCount());
-
-			sModel.positions.reserve(sModel.positions.size() + static_cast<size_t>(uVertexCount) * 3);
-			sModel.normals.reserve(sModel.normals.size() + static_cast<size_t>(uVertexCount) * 3);
-			sModel.texcoords.reserve(sModel.texcoords.size() + static_cast<size_t>(uVertexCount) * 2);
-
-			for (cgltf_size uVertexIndex = 0; uVertexIndex < uVertexCount; ++uVertexIndex) {
-				float afPosition[3] = {0.0f, 0.0f, 0.0f};
-				cgltf_accessor_read_float(pPositionAccessor, uVertexIndex, afPosition, 3);
-				sModel.positions.push_back(afPosition[0]);
-				sModel.positions.push_back(afPosition[1]);
-				sModel.positions.push_back(afPosition[2]);
-
-				if (pNormalAccessor) {
-					float afNormal[3] = {0.0f, 0.0f, 0.0f};
-					if (cgltf_accessor_read_float(pNormalAccessor, uVertexIndex, afNormal, 3)) {
-						sModel.normals.push_back(afNormal[0]);
-						sModel.normals.push_back(afNormal[1]);
-						sModel.normals.push_back(afNormal[2]);
-					} else {
-						sModel.normals.insert(sModel.normals.end(), {0.0f, 0.0f, 0.0f});
-					}
-				} else {
-					sModel.normals.insert(sModel.normals.end(), {0.0f, 0.0f, 0.0f});
-				}
-
-				if (pTexcoordAccessor) {
-					float afTexcoord[2] = {0.0f, 0.0f};
-					if (cgltf_accessor_read_float(pTexcoordAccessor, uVertexIndex, afTexcoord, 2)) {
-						sModel.texcoords.push_back(afTexcoord[0]);
-						sModel.texcoords.push_back(afTexcoord[1]);
-					} else {
-						sModel.texcoords.insert(sModel.texcoords.end(), {0.0f, 0.0f});
-					}
-				} else {
-					sModel.texcoords.insert(sModel.texcoords.end(), {0.0f, 0.0f});
-				}
-			}
-
-			const cgltf_accessor* pIndicesAccessor = sPrimitive.indices;
-			const cgltf_size uIndexCount = pIndicesAccessor ? pIndicesAccessor->count : uVertexCount;
-			if (uIndexCount == 0) {
-				continue;
-			}
-
-			sModel.indices.reserve(sModel.indices.size() + static_cast<size_t>(uIndexCount));
-
-			const uint32_t uIndexOffset = static_cast<uint32_t>(sModel.indices.size());
-			if (pIndicesAccessor) {
-				for (cgltf_size uIndex = 0; uIndex < uIndexCount; ++uIndex) {
-					const cgltf_size uValue = cgltf_accessor_read_index(pIndicesAccessor, uIndex);
-					sModel.indices.push_back(uVertexBase + static_cast<uint32_t>(uValue));
-				}
-			} else {
-				for (cgltf_size uIndex = 0; uIndex < uVertexCount; ++uIndex) {
-					sModel.indices.push_back(uVertexBase + static_cast<uint32_t>(uIndex));
-				}
-			}
-
-			uint16_t uMaterialIndex = 0;
-			if (sPrimitive.material) {
-				auto itMaterial = mapMaterialByPointer.find(sPrimitive.material);
-				if (itMaterial != mapMaterialByPointer.end()) {
-					uMaterialIndex = itMaterial->second;
-				} else {
-					std::string strGeneratedName;
-					if (sPrimitive.material->name && sPrimitive.material->name[0] != '\0') {
-						strGeneratedName = sPrimitive.material->name;
-					} else {
-						strGeneratedName = "Material";
-					}
-					uMaterialIndex = ensureMaterial(sModel, strGeneratedName, mapMaterialByName);
-				}
-			}
-
-			Model::Subset sSubset;
-			sSubset.indexOffset = uIndexOffset;
-			sSubset.indexCount = static_cast<uint32_t>(sModel.indices.size()) - uIndexOffset;
-			sSubset.materialIndex = uMaterialIndex;
-
-			if (!sModel.subsets.empty()) {
-				Model::Subset& sLastSubset = sModel.subsets.back();
-				if (sLastSubset.materialIndex == sSubset.materialIndex &&
-					sLastSubset.indexOffset + sLastSubset.indexCount == sSubset.indexOffset) {
-					sLastSubset.indexCount += sSubset.indexCount;
-					continue;
-				}
-			}
-
-			sModel.subsets.push_back(sSubset);
 		}
 	}
 
