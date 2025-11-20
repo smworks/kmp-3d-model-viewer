@@ -43,9 +43,10 @@ fun AndroidSample() {
 
         if (supported) {
             val sceneState = rememberEngineScene {
-                cameraDistance = -1.1f
-                model("models/cube-tex.obj") {
-                    autoRotate(speedX = 0.005f, speedY = 0.01f)
+                cameraDistance = 2.5f
+                model("models/Box.gltf") {
+                    scale(0.1f)
+                    autoRotate(speedX = 0.01f, speedY = 0.06f)
                 }
             }
             val fps by sceneState.fps

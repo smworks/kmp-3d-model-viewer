@@ -8,11 +8,16 @@
 #include <cctype>
 #include <cstdint>
 #include <cstdlib>
+#include <cstring>
 #include <functional>
 #include <limits>
+#include <memory>
 #include <sstream>
 #include <unordered_map>
 #include <vector>
+
+#define CGLTF_IMPLEMENTATION
+#include "cgltf.h"
 
 #define LOG_TAG "ModelLoader"
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO, LOG_TAG, __VA_ARGS__)
@@ -305,12 +310,75 @@ void parseMtlContents(const std::string& mtlText, const std::string& baseDir, Mo
 	pushMaterial();
 }
 
+struct SAssetFileContext {
+	AAssetManager* pAssetManager = nullptr;
+};
+
+cgltf_result assetFileRead(const cgltf_memory_options* pMemoryOptions,
+	const cgltf_file_options* pFileOptions,
+	const char* path,
+	cgltf_size* pSize,
+	void** ppData) {
+	if (!pFileOptions || !pSize || !ppData) {
+		return cgltf_result_invalid_options;
+	}
+	const SAssetFileContext* pContext = static_cast<const SAssetFileContext*>(pFileOptions->user_data);
+	if (!pContext || !pContext->pAssetManager || path == nullptr) {
+		return cgltf_result_io_error;
+	}
+	std::string strAssetPath(path);
+	if (!strAssetPath.empty() && (strAssetPath.front() == '/' || strAssetPath.front() == '\\')) {
+		strAssetPath.erase(strAssetPath.begin());
+	}
+	const std::string strFileData = readAssetFile(pContext->pAssetManager, strAssetPath);
+	if (strFileData.empty()) {
+		return cgltf_result_file_not_found;
+	}
+	const cgltf_size uBufferSize = static_cast<cgltf_size>(strFileData.size());
+	void* pBuffer = nullptr;
+	if (pMemoryOptions && pMemoryOptions->alloc_func) {
+		pBuffer = pMemoryOptions->alloc_func(pMemoryOptions->user_data, uBufferSize);
+	}
+	if (!pBuffer) {
+		pBuffer = std::malloc(uBufferSize);
+		if (!pBuffer) {
+			return cgltf_result_out_of_memory;
+		}
+	}
+	std::memcpy(pBuffer, strFileData.data(), strFileData.size());
+	*ppData = pBuffer;
+	*pSize = uBufferSize;
+	return cgltf_result_success;
+}
+
+void assetFileRelease(const cgltf_memory_options* pMemoryOptions,
+	const cgltf_file_options*,
+	void* pData,
+	cgltf_size) {
+	if (!pData) {
+		return;
+	}
+	if (pMemoryOptions && pMemoryOptions->free_func) {
+		pMemoryOptions->free_func(pMemoryOptions->user_data, pData);
+	} else {
+		std::free(pData);
+	}
+}
+
+struct SCgltfDeleter {
+	void operator()(cgltf_data* pData) const noexcept {
+		if (pData) {
+			cgltf_free(pData);
+		}
+	}
+};
+
 } // namespace
 
-Model loadModel(AAssetManager* assetManager, const std::string& modelName) {
+static Model loadObjModelInternal(AAssetManager* assetManager, const std::string& modelName) {
 	Model model;
 	if (!assetManager) {
-		LOGE("loadModel called with null asset manager");
+		LOGE("loadObjModelInternal called with null asset manager");
 		return model;
 	}
 	if (modelName.empty()) {
@@ -477,13 +545,256 @@ Model loadModel(AAssetManager* assetManager, const std::string& modelName) {
 		}
 	}
 
-	LOGI("Loaded model '%s': %zu vertices, %zu triangles, %zu materials",
+	LOGI("Loaded OBJ model '%s': %zu vertices, %zu triangles, %zu materials",
 		modelName.c_str(),
 		model.vertexCount(),
 		model.triangleCount(),
 		model.materials.size());
 
 	return model;
+}
+
+static Model loadGltfModelInternal(AAssetManager* pAssetManager, const std::string& strModelName) {
+	Model sModel;
+	if (!pAssetManager) {
+		LOGE("loadGltfModelInternal called with null asset manager");
+		return sModel;
+	}
+	if (strModelName.empty()) {
+		LOGE("Model name is empty");
+		return sModel;
+	}
+
+	const std::string strGltfText = readAssetFile(pAssetManager, strModelName);
+	if (strGltfText.empty()) {
+		LOGE("glTF asset is empty: %s", strModelName.c_str());
+		return sModel;
+	}
+
+	const std::string strBaseDir = directoryOf(strModelName);
+
+	SAssetFileContext sFileContext;
+	sFileContext.pAssetManager = pAssetManager;
+
+	cgltf_options sOptions{};
+	sOptions.type = cgltf_file_type_gltf;
+	sOptions.file.read = assetFileRead;
+	sOptions.file.release = assetFileRelease;
+	sOptions.file.user_data = &sFileContext;
+
+	cgltf_data* pRawData = nullptr;
+	cgltf_result eParseResult = cgltf_parse(&sOptions, strGltfText.data(), strGltfText.size(), &pRawData);
+	if (eParseResult != cgltf_result_success) {
+		LOGE("Failed to parse glTF file %s (error %d)", strModelName.c_str(), static_cast<int>(eParseResult));
+		return sModel;
+	}
+	std::unique_ptr<cgltf_data, SCgltfDeleter> pData(pRawData);
+
+	const char* pszBasePath = strBaseDir.empty() ? nullptr : strBaseDir.c_str();
+	cgltf_result eBufferResult = cgltf_load_buffers(&sOptions, pData.get(), pszBasePath);
+	if (eBufferResult != cgltf_result_success) {
+		LOGE("Failed to load glTF buffers for %s (error %d)", strModelName.c_str(), static_cast<int>(eBufferResult));
+		return sModel;
+	}
+
+	std::unordered_map<const cgltf_material*, uint16_t> mapMaterialByPointer;
+	std::unordered_map<std::string, uint16_t> mapMaterialByName;
+
+	if (pData->materials_count > 0) {
+		mapMaterialByPointer.reserve(pData->materials_count);
+		mapMaterialByName.reserve(pData->materials_count);
+		for (cgltf_size uMaterialIndex = 0; uMaterialIndex < pData->materials_count; ++uMaterialIndex) {
+			const cgltf_material& sSourceMaterial = pData->materials[uMaterialIndex];
+			Material sMappedMaterial;
+			if (sSourceMaterial.name && sSourceMaterial.name[0] != '\0') {
+				sMappedMaterial.name = sSourceMaterial.name;
+			} else {
+				sMappedMaterial.name = "Material_" + std::to_string(uMaterialIndex);
+			}
+			if (sSourceMaterial.has_pbr_metallic_roughness) {
+				const cgltf_pbr_metallic_roughness& sPbr = sSourceMaterial.pbr_metallic_roughness;
+				sMappedMaterial.diffuseColor[0] = sPbr.base_color_factor[0];
+				sMappedMaterial.diffuseColor[1] = sPbr.base_color_factor[1];
+				sMappedMaterial.diffuseColor[2] = sPbr.base_color_factor[2];
+			}
+			const uint16_t uMaterialSlot = static_cast<uint16_t>(sModel.materials.size());
+			sModel.materials.push_back(sMappedMaterial);
+			mapMaterialByPointer[&sSourceMaterial] = uMaterialSlot;
+			mapMaterialByName[sMappedMaterial.name] = uMaterialSlot;
+		}
+	}
+
+	if (sModel.materials.empty()) {
+		Material sDefaultMaterial;
+		sDefaultMaterial.name = "Default";
+		sModel.materials.push_back(sDefaultMaterial);
+		mapMaterialByName["Default"] = 0;
+	}
+
+	sModel.subsets.clear();
+
+	for (cgltf_size uMeshIndex = 0; uMeshIndex < pData->meshes_count; ++uMeshIndex) {
+		const cgltf_mesh& sMesh = pData->meshes[uMeshIndex];
+		for (cgltf_size uPrimitiveIndex = 0; uPrimitiveIndex < sMesh.primitives_count; ++uPrimitiveIndex) {
+			const cgltf_primitive& sPrimitive = sMesh.primitives[uPrimitiveIndex];
+			if (sPrimitive.type != cgltf_primitive_type_triangles) {
+				LOGE("Unsupported primitive type %d in glTF model %s", static_cast<int>(sPrimitive.type), strModelName.c_str());
+				continue;
+			}
+
+			const cgltf_accessor* pPositionAccessor = nullptr;
+			const cgltf_accessor* pNormalAccessor = nullptr;
+			const cgltf_accessor* pTexcoordAccessor = nullptr;
+
+			for (cgltf_size uAttributeIndex = 0; uAttributeIndex < sPrimitive.attributes_count; ++uAttributeIndex) {
+				const cgltf_attribute& sAttribute = sPrimitive.attributes[uAttributeIndex];
+				if (sAttribute.type == cgltf_attribute_type_position) {
+					pPositionAccessor = sAttribute.data;
+				} else if (sAttribute.type == cgltf_attribute_type_normal) {
+					pNormalAccessor = sAttribute.data;
+				} else if (sAttribute.type == cgltf_attribute_type_texcoord && sAttribute.index == 0) {
+					pTexcoordAccessor = sAttribute.data;
+				}
+			}
+
+			if (!pPositionAccessor || pPositionAccessor->count == 0) {
+				LOGE("glTF primitive missing positions in %s", strModelName.c_str());
+				continue;
+			}
+
+			const cgltf_size uVertexCount = pPositionAccessor->count;
+			const uint32_t uVertexBase = static_cast<uint32_t>(sModel.vertexCount());
+
+			sModel.positions.reserve(sModel.positions.size() + static_cast<size_t>(uVertexCount) * 3);
+			sModel.normals.reserve(sModel.normals.size() + static_cast<size_t>(uVertexCount) * 3);
+			sModel.texcoords.reserve(sModel.texcoords.size() + static_cast<size_t>(uVertexCount) * 2);
+
+			for (cgltf_size uVertexIndex = 0; uVertexIndex < uVertexCount; ++uVertexIndex) {
+				float afPosition[3] = {0.0f, 0.0f, 0.0f};
+				cgltf_accessor_read_float(pPositionAccessor, uVertexIndex, afPosition, 3);
+				sModel.positions.push_back(afPosition[0]);
+				sModel.positions.push_back(afPosition[1]);
+				sModel.positions.push_back(afPosition[2]);
+
+				if (pNormalAccessor) {
+					float afNormal[3] = {0.0f, 0.0f, 0.0f};
+					if (cgltf_accessor_read_float(pNormalAccessor, uVertexIndex, afNormal, 3)) {
+						sModel.normals.push_back(afNormal[0]);
+						sModel.normals.push_back(afNormal[1]);
+						sModel.normals.push_back(afNormal[2]);
+					} else {
+						sModel.normals.insert(sModel.normals.end(), {0.0f, 0.0f, 0.0f});
+					}
+				} else {
+					sModel.normals.insert(sModel.normals.end(), {0.0f, 0.0f, 0.0f});
+				}
+
+				if (pTexcoordAccessor) {
+					float afTexcoord[2] = {0.0f, 0.0f};
+					if (cgltf_accessor_read_float(pTexcoordAccessor, uVertexIndex, afTexcoord, 2)) {
+						sModel.texcoords.push_back(afTexcoord[0]);
+						sModel.texcoords.push_back(afTexcoord[1]);
+					} else {
+						sModel.texcoords.insert(sModel.texcoords.end(), {0.0f, 0.0f});
+					}
+				} else {
+					sModel.texcoords.insert(sModel.texcoords.end(), {0.0f, 0.0f});
+				}
+			}
+
+			const cgltf_accessor* pIndicesAccessor = sPrimitive.indices;
+			const cgltf_size uIndexCount = pIndicesAccessor ? pIndicesAccessor->count : uVertexCount;
+			if (uIndexCount == 0) {
+				continue;
+			}
+
+			sModel.indices.reserve(sModel.indices.size() + static_cast<size_t>(uIndexCount));
+
+			const uint32_t uIndexOffset = static_cast<uint32_t>(sModel.indices.size());
+			if (pIndicesAccessor) {
+				for (cgltf_size uIndex = 0; uIndex < uIndexCount; ++uIndex) {
+					const cgltf_size uValue = cgltf_accessor_read_index(pIndicesAccessor, uIndex);
+					sModel.indices.push_back(uVertexBase + static_cast<uint32_t>(uValue));
+				}
+			} else {
+				for (cgltf_size uIndex = 0; uIndex < uVertexCount; ++uIndex) {
+					sModel.indices.push_back(uVertexBase + static_cast<uint32_t>(uIndex));
+				}
+			}
+
+			uint16_t uMaterialIndex = 0;
+			if (sPrimitive.material) {
+				auto itMaterial = mapMaterialByPointer.find(sPrimitive.material);
+				if (itMaterial != mapMaterialByPointer.end()) {
+					uMaterialIndex = itMaterial->second;
+				} else {
+					std::string strGeneratedName;
+					if (sPrimitive.material->name && sPrimitive.material->name[0] != '\0') {
+						strGeneratedName = sPrimitive.material->name;
+					} else {
+						strGeneratedName = "Material";
+					}
+					uMaterialIndex = ensureMaterial(sModel, strGeneratedName, mapMaterialByName);
+				}
+			}
+
+			Model::Subset sSubset;
+			sSubset.indexOffset = uIndexOffset;
+			sSubset.indexCount = static_cast<uint32_t>(sModel.indices.size()) - uIndexOffset;
+			sSubset.materialIndex = uMaterialIndex;
+
+			if (!sModel.subsets.empty()) {
+				Model::Subset& sLastSubset = sModel.subsets.back();
+				if (sLastSubset.materialIndex == sSubset.materialIndex &&
+					sLastSubset.indexOffset + sLastSubset.indexCount == sSubset.indexOffset) {
+					sLastSubset.indexCount += sSubset.indexCount;
+					continue;
+				}
+			}
+
+			sModel.subsets.push_back(sSubset);
+		}
+	}
+
+	LOGI("Loaded glTF model '%s': %zu vertices, %zu triangles, %zu materials",
+		strModelName.c_str(),
+		sModel.vertexCount(),
+		sModel.triangleCount(),
+		sModel.materials.size());
+
+	return sModel;
+}
+
+Model loadModel(AAssetManager* pAssetManager, const std::string& strModelName) {
+	if (!pAssetManager) {
+		LOGE("loadModel called with null asset manager");
+		return {};
+	}
+	if (strModelName.empty()) {
+		LOGE("Model name is empty");
+		return {};
+	}
+
+	std::string strNormalizedName = strModelName;
+	std::transform(strNormalizedName.begin(), strNormalizedName.end(), strNormalizedName.begin(), [](unsigned char ch) {
+		return static_cast<char>(std::tolower(ch));
+	});
+
+	std::string strExtension;
+	const std::string::size_type uDotPos = strNormalizedName.find_last_of('.');
+	if (uDotPos != std::string::npos) {
+		strExtension = strNormalizedName.substr(uDotPos);
+	}
+
+	if (strExtension == ".obj") {
+		return loadObjModelInternal(pAssetManager, strModelName);
+	}
+	if (strExtension == ".gltf") {
+		return loadGltfModelInternal(pAssetManager, strModelName);
+	}
+
+	LOGE("Unsupported model format: %s", strModelName.c_str());
+	return {};
 }
 
 
