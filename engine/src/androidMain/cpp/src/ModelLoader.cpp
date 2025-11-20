@@ -97,6 +97,33 @@ std::string joinPaths(const std::string& dir, const std::string& file) {
 	return dir + "/" + file;
 }
 
+std::string resolveAssetUri(const std::string& strBasePath, std::string strUri) {
+	if (strUri.empty()) return {};
+	if (strUri.compare(0, 5, "data:") == 0) {
+		return {};
+	}
+	strUri = trim(strUri);
+	if (strUri.empty()) return {};
+	std::replace(strUri.begin(), strUri.end(), '\\', '/');
+	while (strUri.compare(0, 2, "./") == 0) {
+		strUri.erase(0, 2);
+	}
+	if (!strUri.empty() && (strUri.front() == '/' || strUri.front() == '\\')) {
+		strUri.erase(strUri.begin());
+	}
+	if (!strBasePath.empty()) {
+		const std::string strForwardPrefix = strBasePath + "/";
+		const std::string strBackwardPrefix = strBasePath + "\\";
+		const bool bHasForwardPrefix = strUri.rfind(strForwardPrefix, 0) == 0;
+		const bool bHasBackwardPrefix = strUri.rfind(strBackwardPrefix, 0) == 0;
+		if (!bHasForwardPrefix && !bHasBackwardPrefix) {
+			strUri = joinPaths(strBasePath, strUri);
+		}
+	}
+	std::replace(strUri.begin(), strUri.end(), '\\', '/');
+	return strUri;
+}
+
 bool parseInt(const std::string& text, int& value) {
 	if (text.empty()) return false;
 	char* end = nullptr;
@@ -312,6 +339,7 @@ void parseMtlContents(const std::string& mtlText, const std::string& baseDir, Mo
 
 struct SAssetFileContext {
 	AAssetManager* pAssetManager = nullptr;
+	std::string strBasePath;
 };
 
 cgltf_result assetFileRead(const cgltf_memory_options* pMemoryOptions,
@@ -327,10 +355,8 @@ cgltf_result assetFileRead(const cgltf_memory_options* pMemoryOptions,
 		return cgltf_result_io_error;
 	}
 	std::string strAssetPath(path);
-	if (!strAssetPath.empty() && (strAssetPath.front() == '/' || strAssetPath.front() == '\\')) {
-		strAssetPath.erase(strAssetPath.begin());
-	}
-	const std::string strFileData = readAssetFile(pContext->pAssetManager, strAssetPath);
+	const std::string strResolvedPath = resolveAssetUri(pContext->strBasePath, strAssetPath);
+	const std::string strFileData = readAssetFile(pContext->pAssetManager, strResolvedPath);
 	if (strFileData.empty()) {
 		return cgltf_result_file_not_found;
 	}
@@ -575,6 +601,7 @@ static Model loadGltfModelInternal(AAssetManager* pAssetManager, const std::stri
 
 	SAssetFileContext sFileContext;
 	sFileContext.pAssetManager = pAssetManager;
+	sFileContext.strBasePath = strBaseDir;
 
 	cgltf_options sOptions{};
 	sOptions.type = cgltf_file_type_gltf;
@@ -616,6 +643,16 @@ static Model loadGltfModelInternal(AAssetManager* pAssetManager, const std::stri
 				sMappedMaterial.diffuseColor[0] = sPbr.base_color_factor[0];
 				sMappedMaterial.diffuseColor[1] = sPbr.base_color_factor[1];
 				sMappedMaterial.diffuseColor[2] = sPbr.base_color_factor[2];
+				const cgltf_texture_view& sBaseColorTexture = sPbr.base_color_texture;
+				if (sBaseColorTexture.texture && sBaseColorTexture.texture->image) {
+					const cgltf_image* pImage = sBaseColorTexture.texture->image;
+					if (pImage->uri && pImage->uri[0] != '\0') {
+						const std::string strTexturePath = resolveAssetUri(strBaseDir, pImage->uri);
+						if (!strTexturePath.empty()) {
+							sMappedMaterial.diffuseTexture = strTexturePath;
+						}
+					}
+				}
 			}
 			const uint16_t uMaterialSlot = static_cast<uint16_t>(sModel.materials.size());
 			sModel.materials.push_back(sMappedMaterial);

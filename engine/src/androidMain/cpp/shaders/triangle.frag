@@ -10,6 +10,9 @@ layout(location=0) out vec4 outColor;
 
 void main() {
 	vec4 sampled = texture(texSampler, fragUV);
+	if (sampled.a <= 0.01f) {
+		discard;
+	}
 	outColor = sampled;
 }
 
