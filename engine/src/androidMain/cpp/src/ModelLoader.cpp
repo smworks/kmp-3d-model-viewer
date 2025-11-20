@@ -16,6 +16,7 @@
 #include <sstream>
 #include <unordered_map>
 #include <vector>
+#include <chrono>
 
 #define CGLTF_IMPLEMENTATION
 #include "cgltf.h"
@@ -834,6 +835,8 @@ static Model loadObjModelInternal(AAssetManager* assetManager, const std::string
 }
 
 static Model loadGltfModelInternal(AAssetManager* pAssetManager, const std::string& strModelName) {
+	using Clock = std::chrono::steady_clock;
+	const Clock::time_point tStart = Clock::now();
 	Model sModel;
 	if (!pAssetManager) {
 		LOGE("loadGltfModelInternal called with null asset manager");
@@ -844,9 +847,12 @@ static Model loadGltfModelInternal(AAssetManager* pAssetManager, const std::stri
 		return sModel;
 	}
 
+	const Clock::time_point tReadStart = Clock::now();
 	const std::string strGltfText = readAssetFile(pAssetManager, strModelName);
+	const Clock::time_point tReadEnd = Clock::now();
 	if (strGltfText.empty()) {
-		LOGE("glTF asset is empty: %s", strModelName.c_str());
+		const double readMs = std::chrono::duration<double, std::milli>(tReadEnd - tReadStart).count();
+		LOGE("glTF asset is empty: %s (read %.2f ms)", strModelName.c_str(), readMs);
 		return sModel;
 	}
 
@@ -863,23 +869,42 @@ static Model loadGltfModelInternal(AAssetManager* pAssetManager, const std::stri
 	sOptions.file.user_data = &sFileContext;
 
 	cgltf_data* pRawData = nullptr;
+	const Clock::time_point tParseStart = Clock::now();
 	cgltf_result eParseResult = cgltf_parse(&sOptions, strGltfText.data(), strGltfText.size(), &pRawData);
+	const Clock::time_point tParseEnd = Clock::now();
 	if (eParseResult != cgltf_result_success) {
-		LOGE("Failed to parse glTF file %s (error %d)", strModelName.c_str(), static_cast<int>(eParseResult));
+		const double readMs = std::chrono::duration<double, std::milli>(tReadEnd - tReadStart).count();
+		const double parseMs = std::chrono::duration<double, std::milli>(tParseEnd - tParseStart).count();
+		LOGE("Failed to parse glTF file %s (error %d, read %.2f ms, parse %.2f ms)",
+			strModelName.c_str(),
+			static_cast<int>(eParseResult),
+			readMs,
+			parseMs);
 		return sModel;
 	}
 	std::unique_ptr<cgltf_data, SCgltfDeleter> pData(pRawData);
 
 	const char* pszBasePath = strBaseDir.empty() ? nullptr : strBaseDir.c_str();
+	const Clock::time_point tBuffersStart = Clock::now();
 	cgltf_result eBufferResult = cgltf_load_buffers(&sOptions, pData.get(), pszBasePath);
+	const Clock::time_point tBuffersEnd = Clock::now();
 	if (eBufferResult != cgltf_result_success) {
-		LOGE("Failed to load glTF buffers for %s (error %d)", strModelName.c_str(), static_cast<int>(eBufferResult));
+		const double readMs = std::chrono::duration<double, std::milli>(tReadEnd - tReadStart).count();
+		const double parseMs = std::chrono::duration<double, std::milli>(tParseEnd - tParseStart).count();
+		const double buffersMs = std::chrono::duration<double, std::milli>(tBuffersEnd - tBuffersStart).count();
+		LOGE("Failed to load glTF buffers for %s (error %d, read %.2f ms, parse %.2f ms, buffers %.2f ms)",
+			strModelName.c_str(),
+			static_cast<int>(eBufferResult),
+			readMs,
+			parseMs,
+			buffersMs);
 		return sModel;
 	}
 
 	std::unordered_map<const cgltf_material*, uint16_t> mapMaterialByPointer;
 	std::unordered_map<std::string, uint16_t> mapMaterialByName;
 
+	const Clock::time_point tMaterialsStart = Clock::now();
 	uint32_t uMaterialsWithTexture = 0;
 	if (pData->materials_count > 0) {
 		mapMaterialByPointer.reserve(pData->materials_count);
@@ -969,6 +994,7 @@ static Model loadGltfModelInternal(AAssetManager* pAssetManager, const std::stri
 
 	sModel.subsets.clear();
 
+	const Clock::time_point tGeometryStart = Clock::now();
 	bool bProcessedGeometry = false;
 
 	const cgltf_scene* pScene = pData->scene ? pData->scene : (pData->scenes_count > 0 ? &pData->scenes[0] : nullptr);
@@ -995,16 +1021,34 @@ static Model loadGltfModelInternal(AAssetManager* pAssetManager, const std::stri
 		}
 	}
 
+	const Clock::time_point tGeometryEnd = Clock::now();
+	const Clock::time_point tEnd = Clock::now();
+	const double readMs = std::chrono::duration<double, std::milli>(tReadEnd - tReadStart).count();
+	const double parseMs = std::chrono::duration<double, std::milli>(tParseEnd - tParseStart).count();
+	const double buffersMs = std::chrono::duration<double, std::milli>(tBuffersEnd - tBuffersStart).count();
+	const double materialsMs = std::chrono::duration<double, std::milli>(tGeometryStart - tMaterialsStart).count();
+	const double geometryMs = std::chrono::duration<double, std::milli>(tGeometryEnd - tGeometryStart).count();
+	const double totalMs = std::chrono::duration<double, std::milli>(tEnd - tStart).count();
+
 	LOGI("Loaded glTF model '%s': %zu vertices, %zu triangles, %zu materials",
 		strModelName.c_str(),
 		sModel.vertexCount(),
 		sModel.triangleCount(),
 		sModel.materials.size());
+	LOGI("glTF load timings for '%s': read %.2f ms, parse %.2f ms, buffers %.2f ms, materials %.2f ms, geometry %.2f ms, total %.2f ms",
+		strModelName.c_str(),
+		readMs,
+		parseMs,
+		buffersMs,
+		materialsMs,
+		geometryMs,
+		totalMs);
 
 	return sModel;
 }
 
 Model loadModel(AAssetManager* pAssetManager, const std::string& strModelName) {
+	const auto startTime = std::chrono::high_resolution_clock::now();
 	if (!pAssetManager) {
 		LOGE("loadModel called with null asset manager");
 		return {};
@@ -1026,13 +1070,26 @@ Model loadModel(AAssetManager* pAssetManager, const std::string& strModelName) {
 	}
 
 	if (strExtension == ".obj") {
-		return loadObjModelInternal(pAssetManager, strModelName);
+		const auto objStart = std::chrono::high_resolution_clock::now();
+		Model model = loadObjModelInternal(pAssetManager, strModelName);
+		const auto objEnd = std::chrono::high_resolution_clock::now();
+		const double milliseconds = std::chrono::duration<double, std::milli>(objEnd - objStart).count();
+		LOGI("loadModel: OBJ '%s' finished in %.2f ms", strModelName.c_str(), milliseconds);
+		return model;
 	}
 	if (strExtension == ".gltf") {
-		return loadGltfModelInternal(pAssetManager, strModelName);
+		const auto gltfStart = std::chrono::high_resolution_clock::now();
+		Model model = loadGltfModelInternal(pAssetManager, strModelName);
+		const auto gltfEnd = std::chrono::high_resolution_clock::now();
+		const double milliseconds = std::chrono::duration<double, std::milli>(gltfEnd - gltfStart).count();
+		LOGI("loadModel: glTF '%s' finished in %.2f ms", strModelName.c_str(), milliseconds);
+		return model;
 	}
 
 	LOGE("Unsupported model format: %s", strModelName.c_str());
+	const auto endTime = std::chrono::high_resolution_clock::now();
+	const double totalMs = std::chrono::duration<double, std::milli>(endTime - startTime).count();
+	LOGI("loadModel: '%s' unsupported format, total elapsed %.2f ms", strModelName.c_str(), totalMs);
 	return {};
 }
 
