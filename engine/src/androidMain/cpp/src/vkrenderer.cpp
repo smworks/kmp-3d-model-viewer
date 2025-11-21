@@ -17,6 +17,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <mutex>
+#include <thread>
 
 #include "ImageLoader.h"
 
@@ -938,38 +939,60 @@ Java_lt_smworks_multiplatform3dengine_vulkan_EngineAPI_nativeResize(JNIEnv* env,
 
 JNIEXPORT void JNICALL
 Java_lt_smworks_multiplatform3dengine_vulkan_EngineAPI_nativeLoadModel(JNIEnv* env, jobject thiz, jlong modelId, jstring modelName, jfloat x, jfloat y, jfloat z, jfloat scale) {
-	std::lock_guard<std::mutex> oGuard(g_stateMutex);
-	const char* modelChars = modelName ? env->GetStringUTFChars(modelName, nullptr) : nullptr;
-	std::string modelPath = modelChars ? std::string(modelChars) : std::string();
-	if (modelChars) {
-		env->ReleaseStringUTFChars(modelName, modelChars);
+	const char* pcModelChars = modelName ? env->GetStringUTFChars(modelName, nullptr) : nullptr;
+	std::string strModelPath = pcModelChars ? std::string(pcModelChars) : std::string();
+	if (pcModelChars) {
+		env->ReleaseStringUTFChars(modelName, pcModelChars);
 	}
 
-	if (modelPath.empty()) {
+	if (strModelPath.empty()) {
 		LOGE("nativeLoadModel called with empty model path");
 		return;
 	}
 
-	float appliedScale = scale > 0.0f ? static_cast<float>(scale) : 1.0f;
-	Model newModel = loadModel(g.assetManager, modelPath);
-	newModel.setPosition(static_cast<float>(x), static_cast<float>(y), static_cast<float>(z));
-	newModel.setScale(appliedScale);
+	const float fAppliedScale = scale > 0.0f ? static_cast<float>(scale) : 1.0f;
+	const float fPosX = static_cast<float>(x);
+	const float fPosY = static_cast<float>(y);
+	const float fPosZ = static_cast<float>(z);
+	const int64_t llModelId = static_cast<int64_t>(modelId);
 
-	if (!newModel.hasGeometry()) {
-		LOGE("Model %s has no geometry and will be skipped", modelPath.c_str());
+	AAssetManager* pAssetManager = nullptr;
+	{
+		std::lock_guard<std::mutex> oGuard(g_stateMutex);
+		pAssetManager = g.assetManager;
+	}
+
+	if (!pAssetManager) {
+		LOGE("nativeLoadModel called before asset manager was ready");
 		return;
 	}
 
-	GpuModel gpuModel;
-	gpuModel.id = static_cast<int64_t>(modelId);
-	gpuModel.cpu = std::move(newModel);
+	std::thread oLoader([strModelPath = std::move(strModelPath), fPosX, fPosY, fPosZ, fAppliedScale, llModelId, pAssetManager]() mutable {
+		Model oNewModel = loadModel(pAssetManager, strModelPath);
+		if (!oNewModel.hasGeometry()) {
+			LOGE("Model %s has no geometry and will be skipped", strModelPath.c_str());
+			return;
+		}
 
-	if (g.initialized) {
-		vkDeviceWaitIdle(g.device);
-		uploadGpuBuffers(gpuModel);
-	}
+		oNewModel.setPosition(fPosX, fPosY, fPosZ);
+		oNewModel.setScale(fAppliedScale);
 
-	g.models.push_back(std::move(gpuModel));
+		GpuModel oGpuModel;
+		oGpuModel.id = llModelId;
+		oGpuModel.cpu = std::move(oNewModel);
+
+		std::lock_guard<std::mutex> oGuard(g_stateMutex);
+		if (!g.assetManager) {
+			LOGE("Skipping model %s load because engine was destroyed", strModelPath.c_str());
+			return;
+		}
+		if (g.initialized) {
+			vkDeviceWaitIdle(g.device);
+			uploadGpuBuffers(oGpuModel);
+		}
+		g.models.push_back(std::move(oGpuModel));
+	});
+	oLoader.detach();
 }
 
 JNIEXPORT void JNICALL
