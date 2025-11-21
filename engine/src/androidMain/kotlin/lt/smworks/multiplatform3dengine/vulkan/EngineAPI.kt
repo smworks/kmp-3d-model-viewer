@@ -108,6 +108,39 @@ actual class EngineAPI actual constructor() {
         }
     }
 
+    actual fun rotateBy(modelId: Long, deltaX: Float, deltaY: Float, deltaZ: Float) {
+        val state = modelStates[modelId] ?: return
+        rotate(modelId, state.rotX + deltaX, state.rotY + deltaY, state.rotZ + deltaZ)
+    }
+
+    actual fun translate(modelId: Long, x: Float, y: Float, z: Float) {
+        val state = modelStates[modelId] ?: return
+        state.x = x
+        state.y = y
+        state.z = z
+        if (isNativeReady) {
+            nativeTranslateModel(modelId, x, y, z)
+        }
+    }
+
+    actual fun translateBy(modelId: Long, deltaX: Float, deltaY: Float, deltaZ: Float) {
+        val state = modelStates[modelId] ?: return
+        translate(modelId, state.x + deltaX, state.y + deltaY, state.z + deltaZ)
+    }
+
+    actual fun scale(modelId: Long, scale: Float) {
+        val state = modelStates[modelId] ?: return
+        state.scale = scale
+        if (isNativeReady) {
+            nativeScaleModel(modelId, scale)
+        }
+    }
+
+    actual fun scaleBy(modelId: Long, delta: Float) {
+        val state = modelStates[modelId] ?: return
+        scale(modelId, state.scale + delta)
+    }
+
     fun setupForGestures() {
         // Store this renderer instance for gesture handling
         setCurrentRendererForGestures(this)
@@ -165,6 +198,8 @@ actual class EngineAPI actual constructor() {
     private external fun nativeLoadModel(modelId: Long, modelName: String, x: Float, y: Float, z: Float, scale: Float)
     private external fun nativeMoveCamera(delta: Float)
     private external fun nativeRotateModel(modelId: Long, rotationX: Float, rotationY: Float, rotationZ: Float)
+    private external fun nativeTranslateModel(modelId: Long, x: Float, y: Float, z: Float)
+    private external fun nativeScaleModel(modelId: Long, scale: Float)
 
     companion object {
         private var sharedAssetManager: AssetManager? = null

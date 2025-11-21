@@ -847,7 +847,7 @@ static void cleanupSwapchain() {
 }
 
 static void recreateSwapchain(uint32_t width, uint32_t height) {
-	std::lock_guard<std::mutex> guard(g_stateMutex);
+	std::lock_guard<std::mutex> oGuard(g_stateMutex);
 	vkDeviceWaitIdle(g.device);
 	cleanupSwapchain();
 	g.builder->buildSwapchain(width, height)
@@ -938,7 +938,7 @@ Java_lt_smworks_multiplatform3dengine_vulkan_EngineAPI_nativeResize(JNIEnv* env,
 
 JNIEXPORT void JNICALL
 Java_lt_smworks_multiplatform3dengine_vulkan_EngineAPI_nativeLoadModel(JNIEnv* env, jobject thiz, jlong modelId, jstring modelName, jfloat x, jfloat y, jfloat z, jfloat scale) {
-	std::lock_guard<std::mutex> guard(g_stateMutex);
+	std::lock_guard<std::mutex> oGuard(g_stateMutex);
 	const char* modelChars = modelName ? env->GetStringUTFChars(modelName, nullptr) : nullptr;
 	std::string modelPath = modelChars ? std::string(modelChars) : std::string();
 	if (modelChars) {
@@ -989,6 +989,38 @@ Java_lt_smworks_multiplatform3dengine_vulkan_EngineAPI_nativeRotateModel(JNIEnv*
 		return;
 	}
 	gpuModel->cpu.setRotation(static_cast<float>(rotationX), static_cast<float>(rotationY), static_cast<float>(rotationZ));
+}
+
+JNIEXPORT void JNICALL
+Java_lt_smworks_multiplatform3dengine_vulkan_EngineAPI_nativeTranslateModel(JNIEnv* env, jobject thiz, jlong modelId, jfloat x, jfloat y, jfloat z) {
+	if (!g.initialized) {
+		return;
+	}
+	std::lock_guard<std::mutex> oGuard(g_stateMutex);
+	const int64_t llModelId = static_cast<int64_t>(modelId);
+	GpuModel* pGpuModel = findModelById(llModelId);
+	if (!pGpuModel) {
+		return;
+	}
+	const float fX = static_cast<float>(x);
+	const float fY = static_cast<float>(y);
+	const float fZ = static_cast<float>(z);
+	pGpuModel->cpu.setPosition(fX, fY, fZ);
+}
+
+JNIEXPORT void JNICALL
+Java_lt_smworks_multiplatform3dengine_vulkan_EngineAPI_nativeScaleModel(JNIEnv* env, jobject thiz, jlong modelId, jfloat scale) {
+	if (!g.initialized) {
+		return;
+	}
+	std::lock_guard<std::mutex> oGuard(g_stateMutex);
+	const int64_t llModelId = static_cast<int64_t>(modelId);
+	GpuModel* pGpuModel = findModelById(llModelId);
+	if (!pGpuModel) {
+		return;
+	}
+	const float fScale = static_cast<float>(scale);
+	pGpuModel->cpu.setScale(fScale);
 }
 
 JNIEXPORT void JNICALL

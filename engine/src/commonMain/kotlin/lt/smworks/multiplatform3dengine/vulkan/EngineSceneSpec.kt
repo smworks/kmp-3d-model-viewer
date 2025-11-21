@@ -2,14 +2,16 @@ package lt.smworks.multiplatform3dengine.vulkan
 
 import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.State
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.Stable
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.snapshots.SnapshotStateMap
 
 @Stable
 data class EngineSceneSpec(
     val cameraDistance: Float = 0f,
-    val models: List<EngineModelSpec> = emptyList(),
-    val fpsSamplePeriodMs: Long = 250L
+    val models: List<EngineModelHandleRef> = emptyList(),
+    val fpsSamplePeriodMs: Long = 250L,
+    val onUpdate: (EngineSceneUpdateScope.() -> Unit)? = null
 )
 
 @Stable
@@ -36,28 +38,69 @@ data class EngineModelAutoRotate(
 )
 
 @Stable
+class EngineModelHandleRef internal constructor(
+    internal val spec: EngineModelSpec
+) {
+    internal fun isSameSpec(other: EngineModelSpec): Boolean = spec == other
+
+    override fun equals(other: Any?): Boolean {
+        if (this === other) return true
+        if (other !is EngineModelHandleRef) return false
+        return spec == other.spec
+    }
+
+    override fun hashCode(): Int = spec.hashCode()
+}
+
+@Stable
 class EngineSceneState internal constructor(
     val engine: EngineAPI,
-    fpsState: MutableState<Int>
+    fpsState: MutableState<Int>,
+    internal val modelHandles: SnapshotStateMap<EngineModelHandleRef, EngineModelHandle>
 ) {
     val fps: State<Int> = fpsState
+
+    val models: Map<EngineModelHandleRef, EngineModelHandle>
+        get() = modelHandles
+
+    val EngineModelHandleRef.handle: EngineModelHandle?
+        get() = modelHandles[this]
+
+    fun model(assetPath: String): EngineModelHandle? {
+        return modelHandles.values.firstOrNull { handle -> handle.assetPath == assetPath }
+    }
+
+    fun model(handleRef: EngineModelHandleRef): EngineModelHandle? {
+        return modelHandles[handleRef]
+    }
+
+    fun model(spec: EngineModelSpec): EngineModelHandle? {
+        return modelHandles.entries.firstOrNull { entry -> entry.key.isSameSpec(spec) }?.value
+    }
 }
 
 class EngineSceneBuilder {
     var cameraDistance: Float = 0f
     var fpsSamplePeriodMs: Long = 250L
-    private val models = mutableListOf<EngineModelSpec>()
+    private val modelRefs = mutableListOf<EngineModelHandleRef>()
+    private var onUpdate: (EngineSceneUpdateScope.() -> Unit)? = null
 
-    fun model(assetPath: String, block: EngineModelBuilder.() -> Unit = {}) {
+    fun model(assetPath: String, block: EngineModelBuilder.() -> Unit = {}): EngineModelHandleRef {
         val builder = EngineModelBuilder(assetPath).apply(block)
-        models += builder.build()
+        val spec = builder.build()
+        return EngineModelHandleRef(spec).also(modelRefs::add)
+    }
+
+    fun onUpdate(block: EngineSceneUpdateScope.() -> Unit) {
+        onUpdate = block
     }
 
     fun build(): EngineSceneSpec {
         return EngineSceneSpec(
             cameraDistance = cameraDistance,
-            models = models.toList(),
-            fpsSamplePeriodMs = fpsSamplePeriodMs
+            models = modelRefs.toList(),
+            fpsSamplePeriodMs = fpsSamplePeriodMs,
+            onUpdate = onUpdate
         )
     }
 }
@@ -103,4 +146,60 @@ fun engineScene(block: EngineSceneBuilder.() -> Unit): EngineSceneSpec {
 }
 
 internal fun rememberFpsState(): MutableState<Int> = mutableStateOf(0)
+
+@Stable
+class EngineModelHandle internal constructor(
+    val id: Long,
+    val assetPath: String,
+    private val engine: EngineAPI
+) {
+    fun translateTo(x: Float, y: Float, z: Float) {
+        engine.translate(id, x, y, z)
+    }
+
+    fun translateBy(deltaX: Float, deltaY: Float, deltaZ: Float) {
+        engine.translateBy(id, deltaX, deltaY, deltaZ)
+    }
+
+    fun scaleTo(value: Float) {
+        engine.scale(id, value)
+    }
+
+    fun scaleBy(delta: Float) {
+        engine.scaleBy(id, delta)
+    }
+
+    fun rotateTo(rotationX: Float, rotationY: Float, rotationZ: Float) {
+        engine.rotate(id, rotationX, rotationY, rotationZ)
+    }
+
+    fun rotateBy(deltaX: Float, deltaY: Float, deltaZ: Float) {
+        engine.rotateBy(id, deltaX, deltaY, deltaZ)
+    }
+}
+
+@Stable
+class EngineSceneUpdateScope internal constructor(
+    private val handles: SnapshotStateMap<EngineModelHandleRef, EngineModelHandle>
+) {
+    val models: Collection<EngineModelHandle>
+        get() = handles.values
+
+    val EngineModelHandleRef.handle: EngineModelHandle?
+        get() = handles[this]
+
+    fun model(handleRef: EngineModelHandleRef): EngineModelHandle? = handles[handleRef]
+
+    fun model(spec: EngineModelSpec): EngineModelHandle? {
+        return handles.entries.firstOrNull { entry -> entry.key.isSameSpec(spec) }?.value
+    }
+
+    fun model(assetPath: String): EngineModelHandle? {
+        return handles.values.firstOrNull { handle -> handle.assetPath == assetPath }
+    }
+
+    fun forEach(action: (EngineModelHandle) -> Unit) {
+        handles.values.forEach(action)
+    }
+}
 

@@ -16,6 +16,26 @@ actual class EngineAPI actual constructor() {
         // No-op on iOS until native renderer is implemented.
     }
 
+    actual fun rotateBy(modelId: Long, deltaX: Float, deltaY: Float, deltaZ: Float) {
+        // No-op on iOS until native renderer is implemented.
+    }
+
+    actual fun translate(modelId: Long, x: Float, y: Float, z: Float) {
+        // No-op on iOS until native renderer is implemented.
+    }
+
+    actual fun translateBy(modelId: Long, deltaX: Float, deltaY: Float, deltaZ: Float) {
+        // No-op on iOS until native renderer is implemented.
+    }
+
+    actual fun scale(modelId: Long, scale: Float) {
+        // No-op on iOS until native renderer is implemented.
+    }
+
+    actual fun scaleBy(modelId: Long, delta: Float) {
+        // No-op on iOS until native renderer is implemented.
+    }
+
     actual fun getFps(): Int = 0
 }
 

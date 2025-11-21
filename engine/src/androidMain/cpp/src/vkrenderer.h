@@ -24,6 +24,12 @@ JNIEXPORT void JNICALL
 Java_lt_smworks_multiplatform3dengine_vulkan_EngineAPI_nativeRotateModel(JNIEnv* env, jobject thiz, jlong modelId, jfloat rotationX, jfloat rotationY, jfloat rotationZ);
 
 JNIEXPORT void JNICALL
+Java_lt_smworks_multiplatform3dengine_vulkan_EngineAPI_nativeTranslateModel(JNIEnv* env, jobject thiz, jlong modelId, jfloat x, jfloat y, jfloat z);
+
+JNIEXPORT void JNICALL
+Java_lt_smworks_multiplatform3dengine_vulkan_EngineAPI_nativeScaleModel(JNIEnv* env, jobject thiz, jlong modelId, jfloat scale);
+
+JNIEXPORT void JNICALL
 Java_lt_smworks_multiplatform3dengine_vulkan_EngineAPI_nativeRender(JNIEnv* env, jobject thiz);
 
 JNIEXPORT void JNICALL

@@ -4,6 +4,11 @@ expect class EngineAPI() {
     fun loadModel(modelName: String, x: Float, y: Float, z: Float, scale: Float = 1.0f): Long
     fun moveCamera(delta: Float)
     fun rotate(modelId: Long, rotationX: Float, rotationY: Float, rotationZ: Float)
+    fun rotateBy(modelId: Long, deltaX: Float, deltaY: Float, deltaZ: Float)
+    fun translate(modelId: Long, x: Float, y: Float, z: Float)
+    fun translateBy(modelId: Long, deltaX: Float, deltaY: Float, deltaZ: Float)
+    fun scale(modelId: Long, scale: Float)
+    fun scaleBy(modelId: Long, delta: Float)
     fun getFps(): Int
 }
 

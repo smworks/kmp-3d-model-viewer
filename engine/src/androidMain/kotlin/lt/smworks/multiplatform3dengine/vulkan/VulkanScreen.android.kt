@@ -7,6 +7,7 @@ import android.view.MotionEvent
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.viewinterop.AndroidView
@@ -162,8 +163,9 @@ fun rememberEngineScene(
 ): EngineSceneState {
     val engine = rememberEngineApi()
     val fpsState = remember { rememberFpsState() }
-    val loadedModels = remember(engine) { mutableMapOf<EngineModelSpec, Long>() }
-    val rotationJobs = remember(engine) { mutableMapOf<EngineModelSpec, Job>() }
+    val loadedModels = remember(engine) { mutableStateMapOf<EngineModelHandleRef, EngineModelHandle>() }
+    val rotationJobs = remember(engine) { mutableMapOf<EngineModelHandleRef, Job>() }
+    val updateScope = remember(engine) { EngineSceneUpdateScope(loadedModels) }
 
     LaunchedEffect(engine, sceneSpec.cameraDistance) {
         if (sceneSpec.cameraDistance != 0f) {
@@ -173,35 +175,51 @@ fun rememberEngineScene(
 
     LaunchedEffect(engine, sceneSpec.models) {
         val fullRotation = (PI * 2f).toFloat()
-        val activeSpecs = sceneSpec.models.toSet()
+        val activeRefs = sceneSpec.models.toSet()
 
-        val staleSpecs = rotationJobs.keys - activeSpecs
-        staleSpecs.forEach { spec ->
-            rotationJobs.remove(spec)?.cancel()
+        val staleRefs = rotationJobs.keys - activeRefs
+        staleRefs.forEach { ref ->
+            rotationJobs.remove(ref)?.cancel()
         }
 
-        loadedModels.keys.retainAll(activeSpecs)
+        loadedModels.keys.toList()
+            .filter { ref -> ref !in activeRefs }
+            .forEach { ref ->
+                loadedModels.remove(ref)
+            }
 
-        sceneSpec.models.forEach { spec ->
+        sceneSpec.models.forEach { ref ->
+            val spec = ref.spec
             val translation = spec.translation
-            val modelId = loadedModels.getOrPut(spec) {
-                engine.loadModel(
+            val handle = loadedModels[ref] ?: run {
+                val modelId = engine.loadModel(
                     spec.assetPath,
                     translation.x,
                     translation.y,
                     translation.z,
                     spec.scale
                 )
+                EngineModelHandle(
+                    id = modelId,
+                    assetPath = spec.assetPath,
+                    engine = engine
+                )
             }
+            loadedModels[ref] = handle
+
+            handle.translateTo(translation.x, translation.y, translation.z)
+            handle.scaleTo(spec.scale)
 
             val autoRotate = spec.autoRotate
             if (autoRotate != null) {
-                val currentJob = rotationJobs[spec]
+                val currentJob = rotationJobs[ref]
                 if (currentJob == null || !currentJob.isActive) {
-                    rotationJobs[spec] = launch {
+                    val modelHandle = handle
+                    rotationJobs[ref] = launch {
                         var rotationX = 0f
                         var rotationY = 0f
                         var rotationZ = 0f
+                        val modelId = modelHandle.id
 
                         val hasRotation = autoRotate.speedX != 0f ||
                             autoRotate.speedY != 0f ||
@@ -220,7 +238,7 @@ fun rememberEngineScene(
                     }
                 }
             } else {
-                rotationJobs.remove(spec)?.cancel()
+                rotationJobs.remove(ref)?.cancel()
             }
         }
     }
@@ -232,10 +250,19 @@ fun rememberEngineScene(
         }
     }
 
+    LaunchedEffect(engine, sceneSpec.onUpdate) {
+        val updater = sceneSpec.onUpdate ?: return@LaunchedEffect
+        while (isActive) {
+            updater.invoke(updateScope)
+            delay(16L)
+        }
+    }
+
     return remember(engine) {
         EngineSceneState(
             engine = engine,
-            fpsState = fpsState
+            fpsState = fpsState,
+            modelHandles = loadedModels
         )
     }
 }
