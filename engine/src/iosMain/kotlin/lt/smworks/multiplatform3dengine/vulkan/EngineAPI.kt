@@ -12,6 +12,14 @@ actual class EngineAPI actual constructor() {
         // No-op on iOS until native renderer is implemented.
     }
 
+    actual fun setCameraPosition(x: Float, y: Float, z: Float) {
+        // No-op on iOS until native renderer is implemented.
+    }
+
+    actual fun setCameraRotation(x: Float, y: Float, z: Float) {
+        // No-op on iOS until native renderer is implemented.
+    }
+
     actual fun rotate(modelId: Long, rotationX: Float, rotationY: Float, rotationZ: Float) {
         // No-op on iOS until native renderer is implemented.
     }

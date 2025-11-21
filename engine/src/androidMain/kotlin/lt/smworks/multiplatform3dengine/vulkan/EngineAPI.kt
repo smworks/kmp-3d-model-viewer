@@ -31,10 +31,12 @@ actual class EngineAPI actual constructor() {
     )
     private val modelStates = LinkedHashMap<Long, ModelState>()
     private val modelIdGenerator = AtomicLong(1L)
-    private var accumulatedCameraDistance = 0f
-    private var accumulatedYaw = 0f
-    private var accumulatedPitch = 0f
-    private var accumulatedRoll = 0f
+    private var cameraPosX = 0f
+    private var cameraPosY = 0f
+    private var cameraPosZ = 4f
+    private var cameraYaw = 0f
+    private var cameraPitch = 0f
+    private var cameraRoll = 0f
 
     init {
         System.loadLibrary("vkrenderer")
@@ -71,9 +73,9 @@ actual class EngineAPI actual constructor() {
     }
 
     fun rotateCamera(yaw: Float, pitch: Float, roll: Float) {
-        accumulatedYaw += yaw
-        accumulatedPitch += pitch
-        accumulatedRoll += roll
+        cameraYaw += yaw
+        cameraPitch += pitch
+        cameraRoll += roll
         if (isNativeReady) {
             nativeRotateCamera(yaw, pitch, roll)
         }
@@ -92,9 +94,27 @@ actual class EngineAPI actual constructor() {
     }
 
     actual fun moveCamera(delta: Float) {
-        accumulatedCameraDistance += delta
+        cameraPosZ -= delta
         if (isNativeReady) {
             nativeMoveCamera(delta)
+        }
+    }
+
+    actual fun setCameraPosition(x: Float, y: Float, z: Float) {
+        cameraPosX = x
+        cameraPosY = y
+        cameraPosZ = z
+        if (isNativeReady) {
+            nativeSetCameraPosition(x, y, z)
+        }
+    }
+
+    actual fun setCameraRotation(x: Float, y: Float, z: Float) {
+        cameraYaw = x
+        cameraPitch = y
+        cameraRoll = z
+        if (isNativeReady) {
+            nativeSetCameraRotation(x, y, z)
         }
     }
 
@@ -182,17 +202,15 @@ actual class EngineAPI actual constructor() {
                 nativeRotateModel(state.id, state.rotX, state.rotY, state.rotZ)
             }
         }
-        if (accumulatedCameraDistance != 0f) {
-            nativeMoveCamera(accumulatedCameraDistance)
-        }
-        if (accumulatedYaw != 0f || accumulatedPitch != 0f || accumulatedRoll != 0f) {
-            nativeRotateCamera(accumulatedYaw, accumulatedPitch, accumulatedRoll)
-        }
+        nativeSetCameraPosition(cameraPosX, cameraPosY, cameraPosZ)
+        nativeSetCameraRotation(cameraYaw, cameraPitch, cameraRoll)
     }
 
     private external fun nativeInit(surface: Surface, assetManager: AssetManager)
     private external fun nativeResize(width: Int, height: Int)
     private external fun nativeRender()
+    private external fun nativeSetCameraPosition(x: Float, y: Float, z: Float)
+    private external fun nativeSetCameraRotation(yaw: Float, pitch: Float, roll: Float)
     private external fun nativeRotateCamera(yaw: Float, pitch: Float, roll: Float)
     private external fun nativeDestroy()
     private external fun nativeLoadModel(modelId: Long, modelName: String, x: Float, y: Float, z: Float, scale: Float)

@@ -10,6 +10,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.viewinterop.AndroidView
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -31,122 +32,131 @@ internal fun setCurrentRendererForGestures(renderer: EngineAPI) {
 @Composable
 actual fun VulkanScreen(
     modifier: Modifier,
-    engine: EngineAPI
+    engine: EngineAPI,
+    onError: (error: String) -> Unit
 ) {
-    AndroidView(
-        modifier = modifier,
-        factory = { context ->
-            SurfaceView(context).apply {
-                var lastTouchX = 0f
-                var lastTouchY = 0f
-                var activePointerId = MotionEvent.INVALID_POINTER_ID
+    val context = LocalContext.current
+    val supported = remember { VulkanSupport.isSupported(context) }
+    if (supported) {
+        AndroidView(
+            modifier = modifier,
+            factory = { context ->
+                SurfaceView(context).apply {
+                    var lastTouchX = 0f
+                    var lastTouchY = 0f
+                    var activePointerId = MotionEvent.INVALID_POINTER_ID
 
-                holder.addCallback(object : SurfaceHolder.Callback {
-                    override fun surfaceCreated(holder: SurfaceHolder) {
-                        val surface = holder.surface
-                        if (surface != null && surface.isValid) {
-                            engine.init(surface, context.assets)
-                            engine.start()
-                        }
-                    }
-
-                    override fun surfaceChanged(holder: SurfaceHolder, format: Int, width: Int, height: Int) {
-                    }
-
-                    override fun surfaceDestroyed(holder: SurfaceHolder) {
-                        engine.destroy()
-                    }
-                })
-
-                setOnTouchListener { _, event ->
-                    when (event.actionMasked) {
-                        MotionEvent.ACTION_DOWN -> {
-                            activePointerId = event.getPointerId(0)
-                            lastTouchX = event.x
-                            lastTouchY = event.y
-                            true
+                    holder.addCallback(object : SurfaceHolder.Callback {
+                        override fun surfaceCreated(holder: SurfaceHolder) {
+                            val surface = holder.surface
+                            if (surface != null && surface.isValid) {
+                                engine.init(surface, context.assets)
+                                engine.start()
+                            }
                         }
 
-                        MotionEvent.ACTION_POINTER_DOWN -> {
-                            val index = event.actionIndex
-                            activePointerId = event.getPointerId(index)
-                            lastTouchX = event.getX(index)
-                            lastTouchY = event.getY(index)
-                            true
+                        override fun surfaceChanged(holder: SurfaceHolder, format: Int, width: Int, height: Int) {
                         }
 
-                        MotionEvent.ACTION_MOVE -> {
-                            if (activePointerId == MotionEvent.INVALID_POINTER_ID) {
-                                return@setOnTouchListener false
+                        override fun surfaceDestroyed(holder: SurfaceHolder) {
+                            engine.destroy()
+                        }
+                    })
+
+                    setOnTouchListener { _, event ->
+                        when (event.actionMasked) {
+                            MotionEvent.ACTION_DOWN -> {
+                                activePointerId = event.getPointerId(0)
+                                lastTouchX = event.x
+                                lastTouchY = event.y
+                                true
                             }
 
-                            val pointerIndex = event.findPointerIndex(activePointerId)
-                            if (pointerIndex == -1) {
-                                return@setOnTouchListener false
+                            MotionEvent.ACTION_POINTER_DOWN -> {
+                                val index = event.actionIndex
+                                activePointerId = event.getPointerId(index)
+                                lastTouchX = event.getX(index)
+                                lastTouchY = event.getY(index)
+                                true
                             }
 
-                            val currentX = event.getX(pointerIndex)
-                            val currentY = event.getY(pointerIndex)
-                            val deltaX = currentX - lastTouchX
-                            val deltaY = currentY - lastTouchY
-
-                            lastTouchX = currentX
-                            lastTouchY = currentY
-
-                            val sensitivity = 0.001f // radians per pixel
-
-                            currentRenderer?.let { renderer ->
-                                val absDeltaX = abs(deltaX)
-                                val absDeltaY = abs(deltaY)
-
-                                if (absDeltaX > 1f || absDeltaY > 1f) {
-                                    renderer.rotateCamera(-deltaX * sensitivity, -deltaY * sensitivity, 0f)
+                            MotionEvent.ACTION_MOVE -> {
+                                if (activePointerId == MotionEvent.INVALID_POINTER_ID) {
+                                    return@setOnTouchListener false
                                 }
-                            }
-                            true
-                        }
 
-                        MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
-                            activePointerId = MotionEvent.INVALID_POINTER_ID
-                            true
-                        }
-
-                        MotionEvent.ACTION_POINTER_UP -> {
-                            val pointerIndex = event.actionIndex
-                            val pointerId = event.getPointerId(pointerIndex)
-                            if (pointerId == activePointerId) {
-                                val newIndex = if (pointerIndex == 0) 1 else 0
-                                if (newIndex < event.pointerCount) {
-                                    activePointerId = event.getPointerId(newIndex)
-                                    lastTouchX = event.getX(newIndex)
-                                    lastTouchY = event.getY(newIndex)
-                                } else {
-                                    activePointerId = MotionEvent.INVALID_POINTER_ID
+                                val pointerIndex = event.findPointerIndex(activePointerId)
+                                if (pointerIndex == -1) {
+                                    return@setOnTouchListener false
                                 }
-                            }
-                            true
-                        }
 
-                        else -> false
+                                val currentX = event.getX(pointerIndex)
+                                val currentY = event.getY(pointerIndex)
+                                val deltaX = currentX - lastTouchX
+                                val deltaY = currentY - lastTouchY
+
+                                lastTouchX = currentX
+                                lastTouchY = currentY
+
+                                val sensitivity = 0.001f // radians per pixel
+
+                                currentRenderer?.let { renderer ->
+                                    val absDeltaX = abs(deltaX)
+                                    val absDeltaY = abs(deltaY)
+
+                                    if (absDeltaX > 1f || absDeltaY > 1f) {
+                                        renderer.rotateCamera(-deltaX * sensitivity, -deltaY * sensitivity, 0f)
+                                    }
+                                }
+                                true
+                            }
+
+                            MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                                activePointerId = MotionEvent.INVALID_POINTER_ID
+                                true
+                            }
+
+                            MotionEvent.ACTION_POINTER_UP -> {
+                                val pointerIndex = event.actionIndex
+                                val pointerId = event.getPointerId(pointerIndex)
+                                if (pointerId == activePointerId) {
+                                    val newIndex = if (pointerIndex == 0) 1 else 0
+                                    if (newIndex < event.pointerCount) {
+                                        activePointerId = event.getPointerId(newIndex)
+                                        lastTouchX = event.getX(newIndex)
+                                        lastTouchY = event.getY(newIndex)
+                                    } else {
+                                        activePointerId = MotionEvent.INVALID_POINTER_ID
+                                    }
+                                }
+                                true
+                            }
+
+                            else -> false
+                        }
                     }
                 }
             }
+        )
+    } else {
+        LaunchedEffect(Unit) {
+            onError("Vulkan is not supported")
         }
-    )
+    }
 }
 
 @Composable
 fun rememberEngineApi(): EngineAPI {
-	val engine = remember { EngineAPI() }
+    val engine = remember { EngineAPI() }
 
-	DisposableEffect(engine) {
-		engine.setupForGestures()
-		onDispose {
-			engine.destroy()
-		}
-	}
+    DisposableEffect(engine) {
+        engine.setupForGestures()
+        onDispose {
+            engine.destroy()
+        }
+    }
 
-	return engine
+    return engine
 }
 
 @Composable
@@ -167,10 +177,14 @@ fun rememberEngineScene(
     val rotationJobs = remember(engine) { mutableMapOf<EngineModelHandleRef, Job>() }
     val updateScope = remember(engine) { EngineSceneUpdateScope(loadedModels) }
 
-    LaunchedEffect(engine, sceneSpec.cameraDistance) {
-        if (sceneSpec.cameraDistance != 0f) {
-            engine.moveCamera(sceneSpec.cameraDistance)
-        }
+    LaunchedEffect(engine, sceneSpec.cameraPosition) {
+        val position = sceneSpec.cameraPosition
+        engine.setCameraPosition(position.x, position.y, position.z)
+    }
+
+    LaunchedEffect(engine, sceneSpec.cameraRotation) {
+        val rotation = sceneSpec.cameraRotation
+        engine.setCameraRotation(rotation.x, rotation.y, rotation.z)
     }
 
     LaunchedEffect(engine, sceneSpec.models) {
@@ -222,8 +236,8 @@ fun rememberEngineScene(
                         val modelId = modelHandle.id
 
                         val hasRotation = autoRotate.speedX != 0f ||
-                            autoRotate.speedY != 0f ||
-                            autoRotate.speedZ != 0f
+                                autoRotate.speedY != 0f ||
+                                autoRotate.speedZ != 0f
 
                         if (!hasRotation) return@launch
 

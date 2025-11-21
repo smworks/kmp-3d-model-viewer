@@ -1,71 +1,100 @@
 #include "Camera.h"
+#include <algorithm>
+
+namespace {
+constexpr float kPi = 3.14159265359f;
+constexpr float kTwoPi = 2.0f * kPi;
+constexpr float kMaxPitch = kPi / 2.0f - 0.1f; // ~89 degrees
+constexpr float kMinCameraZ = 1.0f;
+constexpr float kMaxCameraZ = 50.0f;
+}
 
 Camera::Camera() {
-	// Initialize with default values
-	viewport.x = 0.0f;
-	viewport.y = 0.0f;
-	viewport.width = 0.0f;
-	viewport.height = 0.0f;
-	viewport.minDepth = 0.0f;
-	viewport.maxDepth = 1.0f;
+	oViewport.x = 0.0f;
+	oViewport.y = 0.0f;
+	oViewport.width = 0.0f;
+	oViewport.height = 0.0f;
+	oViewport.minDepth = 0.0f;
+	oViewport.maxDepth = 1.0f;
 	
-	scissor.offset = {0, 0};
-	scissor.extent = {0, 0};
+	oScissor.offset = {0, 0};
+	oScissor.extent = {0, 0};
 	
-	// Initialize rotation angles
-	yaw = 0.0f;
-	pitch = 0.0f;
-	roll = 0.0f;
-	distance = -4.0f;
+	fYaw = 0.0f;
+	fPitch = 0.0f;
+	fRoll = 0.0f;
+	fPosX = 0.0f;
+	fPosY = 0.0f;
+	fPosZ = 4.0f;
 }
 
 void Camera::updateViewport(const VkExtent2D& extent) {
-	viewport.x = 0.0f;
-	viewport.y = 0.0f;
-	viewport.width = static_cast<float>(extent.width);
-	viewport.height = static_cast<float>(extent.height);
-	viewport.minDepth = 0.0f;
-	viewport.maxDepth = 1.0f;
+	oViewport.x = 0.0f;
+	oViewport.y = 0.0f;
+	oViewport.width = static_cast<float>(extent.width);
+	oViewport.height = static_cast<float>(extent.height);
+	oViewport.minDepth = 0.0f;
+	oViewport.maxDepth = 1.0f;
 	
-	scissor.offset = {0, 0};
-	scissor.extent = extent;
+	oScissor.offset = {0, 0};
+	oScissor.extent = extent;
 }
 
 void Camera::applyToCommandBuffer(VkCommandBuffer commandBuffer) const {
-	vkCmdSetViewport(commandBuffer, 0, 1, &viewport);
-	vkCmdSetScissor(commandBuffer, 0, 1, &scissor);
+	vkCmdSetViewport(commandBuffer, 0, 1, &oViewport);
+	vkCmdSetScissor(commandBuffer, 0, 1, &oScissor);
 }
 
 void Camera::rotateYaw(float angle) {
-	yaw += angle;
-	// Keep yaw in reasonable range to avoid precision issues
-	const float twoPi = 2.0f * 3.14159265359f;
-	while (yaw > twoPi) yaw -= twoPi;
-	while (yaw < -twoPi) yaw += twoPi;
+	fYaw = wrapAngle(fYaw + angle);
 }
 
 void Camera::rotatePitch(float angle) {
-	pitch += angle;
-	// Clamp pitch to avoid gimbal lock
-	const float maxPitch = 3.14159265359f / 2.0f - 0.1f; // ~89 degrees
-	if (pitch > maxPitch) pitch = maxPitch;
-	if (pitch < -maxPitch) pitch = -maxPitch;
+	fPitch = clampPitch(fPitch + angle);
 }
 
 void Camera::rotateRoll(float angle) {
-	roll += angle;
-	// Keep roll in reasonable range
-	const float twoPi = 2.0f * 3.14159265359f;
-	while (roll > twoPi) roll -= twoPi;
-	while (roll < -twoPi) roll += twoPi;
+	fRoll = wrapAngle(fRoll + angle);
+}
+
+void Camera::setYaw(float angle) {
+	fYaw = wrapAngle(angle);
+}
+
+void Camera::setPitch(float angle) {
+	fPitch = clampPitch(angle);
+}
+
+void Camera::setRoll(float angle) {
+	fRoll = wrapAngle(angle);
+}
+
+void Camera::setRotation(float yaw, float pitch, float roll) {
+	setYaw(yaw);
+	setPitch(pitch);
+	setRoll(roll);
+}
+
+void Camera::setPosition(float x, float y, float z) {
+	fPosX = x;
+	fPosY = y;
+	fPosZ = std::clamp(z, kMinCameraZ, kMaxCameraZ);
 }
 
 void Camera::move(float delta) {
-	distance += delta;
-	// Prevent the camera from crossing the origin or moving too far away.
-	const float minDistance = -50.0f;
-	const float maxDistance = -1.0f;
-	if (distance < minDistance) distance = minDistance;
-	if (distance > maxDistance) distance = maxDistance;
+	fPosZ = std::clamp(fPosZ - delta, kMinCameraZ, kMaxCameraZ);
+}
+
+float Camera::clampPitch(float angle) const {
+	if (angle > kMaxPitch) return kMaxPitch;
+	if (angle < -kMaxPitch) return -kMaxPitch;
+	return angle;
+}
+
+float Camera::wrapAngle(float angle) const {
+	float wrapped = angle;
+	while (wrapped > kTwoPi) wrapped -= kTwoPi;
+	while (wrapped < -kTwoPi) wrapped += kTwoPi;
+	return wrapped;
 }
 

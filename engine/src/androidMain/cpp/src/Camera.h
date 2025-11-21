@@ -12,15 +12,15 @@ public:
 	void updateViewport(const VkExtent2D& extent);
 	
 	// Get viewport configuration
-	const VkViewport& getViewport() const { return viewport; }
+	const VkViewport& getViewport() const { return oViewport; }
 	
 	// Get scissor configuration
-	const VkRect2D& getScissor() const { return scissor; }
+	const VkRect2D& getScissor() const { return oScissor; }
 	
 	// Get viewport dimensions
-	float getWidth() const { return viewport.width; }
-	float getHeight() const { return viewport.height; }
-	float getAspectRatio() const { return viewport.width > 0 ? viewport.width / viewport.height : 1.0f; }
+	float getWidth() const { return oViewport.width; }
+	float getHeight() const { return oViewport.height; }
+	float getAspectRatio() const { return oViewport.width > 0 ? oViewport.width / oViewport.height : 1.0f; }
 	
 	// Apply viewport and scissor to a command buffer
 	void applyToCommandBuffer(VkCommandBuffer commandBuffer) const;
@@ -31,30 +31,39 @@ public:
 	void rotateRoll(float angle);     // Rotate around Z axis (roll rotation)
 	
 	// Get rotation angles (in radians)
-	float getYaw() const { return yaw; }
-	float getPitch() const { return pitch; }
-	float getRoll() const { return roll; }
+	float getYaw() const { return fYaw; }
+	float getPitch() const { return fPitch; }
+	float getRoll() const { return fRoll; }
 	
 	// Set rotation angles directly (in radians)
-	void setYaw(float angle) { yaw = angle; }
-	void setPitch(float angle) { pitch = angle; }
-	void setRoll(float angle) { roll = angle; }
+	void setYaw(float angle);
+	void setPitch(float angle);
+	void setRoll(float angle);
+	void setRotation(float yaw, float pitch, float roll);
+
+	// Position setters/getters
+	void setPosition(float x, float y, float z);
+	float getPositionX() const { return fPosX; }
+	float getPositionY() const { return fPosY; }
+	float getPositionZ() const { return fPosZ; }
 
 	// Movement along the forward axis (negative Z in world space)
 	void move(float delta);
 
-	// Current camera distance along Z (negative values mean the camera is farther back)
-	float getDistance() const { return distance; }
-
 private:
-	VkViewport viewport{};
-	VkRect2D scissor{};
+	VkViewport oViewport{};
+	VkRect2D oScissor{};
 	
 	// Rotation angles in radians
-	float yaw = 0.0f;    // Rotation around Y axis
-	float pitch = 0.0f;  // Rotation around X axis
-	float roll = 0.0f;   // Rotation around Z axis
+	float fYaw = 0.0f;    // Rotation around Y axis
+	float fPitch = 0.0f;  // Rotation around X axis
+	float fRoll = 0.0f;   // Rotation around Z axis
 
-	float distance = -4.0f; // Translation along Z for simple view transform
+	float fPosX = 0.0f;
+	float fPosY = 0.0f;
+	float fPosZ = 4.0f;
+
+	float clampPitch(float angle) const;
+	float wrapAngle(float angle) const;
 };
 

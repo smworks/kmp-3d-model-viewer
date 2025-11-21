@@ -14,7 +14,9 @@ layout(push_constant) uniform PushConstants {
 	float roll;
 	float width;
 	float height;
-	float distance;
+	float cameraX;
+	float cameraY;
+	float cameraZ;
 	float modelX;
 	float modelY;
 	float modelZ;
@@ -57,8 +59,8 @@ void main() {
 	vec4 rotatedPos = modelRotation * vec4(scaledPos, 1.0);
 	vec4 worldPos = vec4(rotatedPos.xyz + vec3(pc.modelX, pc.modelY, pc.modelZ), 1.0);
 
-	// Camera positioned along negative Z axis by distance
-	vec3 cameraPos = vec3(0.0, 0.0, -pc.distance);
+	// Camera position
+	vec3 cameraPos = vec3(pc.cameraX, pc.cameraY, pc.cameraZ);
 	vec4 viewPos = vec4(worldPos.xyz - cameraPos, 1.0);
 	viewPos = viewRotation * viewPos;
 	mat3 modelNormalMatrix = mat3(modelRotation);

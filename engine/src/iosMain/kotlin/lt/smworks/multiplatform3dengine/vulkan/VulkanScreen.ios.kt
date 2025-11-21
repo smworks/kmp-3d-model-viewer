@@ -10,7 +10,8 @@ actual class VulkanRenderTarget
 @Suppress("UNUSED_PARAMETER")
 actual fun VulkanScreen(
 	modifier: Modifier,
-	engine: EngineAPI
+	engine: EngineAPI,
+    onError: (error: String) -> Unit
 ) {
 	Text("Vulkan screen is not available on iOS", modifier = modifier)
 }

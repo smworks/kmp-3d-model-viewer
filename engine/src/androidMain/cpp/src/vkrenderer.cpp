@@ -757,13 +757,15 @@ static void recordCommandBuffers() {
 				continue;
 			}
 
-			float pushConstants[13] = {
+			float pushConstants[15] = {
 				g.camera.getYaw(),
 				g.camera.getPitch(),
 				g.camera.getRoll(),
 				g.camera.getWidth(),
 				g.camera.getHeight(),
-				g.camera.getDistance(),
+				g.camera.getPositionX(),
+				g.camera.getPositionY(),
+				g.camera.getPositionZ(),
 				model.cpu.position[0],
 				model.cpu.position[1],
 				model.cpu.position[2],
@@ -1002,6 +1004,12 @@ Java_lt_smworks_multiplatform3dengine_vulkan_EngineAPI_nativeMoveCamera(JNIEnv* 
 }
 
 JNIEXPORT void JNICALL
+Java_lt_smworks_multiplatform3dengine_vulkan_EngineAPI_nativeSetCameraPosition(JNIEnv* env, jobject thiz, jfloat x, jfloat y, jfloat z) {
+	if (!g.initialized) return;
+	g.camera.setPosition(static_cast<float>(x), static_cast<float>(y), static_cast<float>(z));
+}
+
+JNIEXPORT void JNICALL
 Java_lt_smworks_multiplatform3dengine_vulkan_EngineAPI_nativeRotateModel(JNIEnv* env, jobject thiz, jlong modelId, jfloat rotationX, jfloat rotationY, jfloat rotationZ) {
 	if (!g.initialized) {
 		return;
@@ -1088,13 +1096,15 @@ Java_lt_smworks_multiplatform3dengine_vulkan_EngineAPI_nativeRender(JNIEnv* env,
 			continue;
 		}
 
-		float pushConstants[13] = {
+		float pushConstants[15] = {
 			g.camera.getYaw(),
 			g.camera.getPitch(),
 			g.camera.getRoll(),
 			g.camera.getWidth(),
 			g.camera.getHeight(),
-			g.camera.getDistance(),
+			g.camera.getPositionX(),
+			g.camera.getPositionY(),
+			g.camera.getPositionZ(),
 			model.cpu.position[0],
 			model.cpu.position[1],
 			model.cpu.position[2],
@@ -1212,6 +1222,12 @@ Java_lt_smworks_multiplatform3dengine_vulkan_EngineAPI_nativeRotateCamera(JNIEnv
 	if (yaw != 0.0f) g.camera.rotateYaw(static_cast<float>(yaw));
 	if (pitch != 0.0f) g.camera.rotatePitch(static_cast<float>(pitch));
 	if (roll != 0.0f) g.camera.rotateRoll(static_cast<float>(roll));
+}
+
+JNIEXPORT void JNICALL
+Java_lt_smworks_multiplatform3dengine_vulkan_EngineAPI_nativeSetCameraRotation(JNIEnv* env, jobject thiz, jfloat yaw, jfloat pitch, jfloat roll) {
+	if (!g.initialized) return;
+	g.camera.setRotation(static_cast<float>(yaw), static_cast<float>(pitch), static_cast<float>(roll));
 }
 
 

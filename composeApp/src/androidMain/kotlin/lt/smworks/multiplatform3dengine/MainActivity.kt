@@ -12,16 +12,13 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.unit.dp
 import lt.smworks.multiplatform3dengine.vulkan.VulkanScreen
-import lt.smworks.multiplatform3dengine.vulkan.VulkanSupport
 import lt.smworks.multiplatform3dengine.vulkan.rememberEngineScene
 
 class MainActivity : ComponentActivity() {
@@ -38,17 +35,15 @@ class MainActivity : ComponentActivity() {
 @Composable
 fun AndroidSample() {
     MaterialTheme {
-        val context = LocalContext.current
-        val supported = remember { VulkanSupport.isSupported(context) }
 
-        if (supported) {
             val sceneState = rememberEngineScene {
-                cameraDistance = 2.5f
-                val adam = model("models/adamHead.gltf") {
-                    scale(0.1f)
+                cameraPosition(z = 1.5f)
+                cameraRotation(x = -0.2f)
+                val scene = model("models/scene.gltf") {
+                    scale(0.001f)
                 }
                 onUpdate {
-                    adam.handle?.rotateBy(0.001f, 0.006f, 0.00f)
+                    scene.handle?.rotateBy(0.001f, 0.006f, 0.00f)
                 }
             }
             val fps by sceneState.fps
@@ -58,7 +53,10 @@ fun AndroidSample() {
             ) {
                 VulkanScreen(
                     modifier = Modifier.fillMaxSize(),
-                    engine = sceneState.engine
+                    engine = sceneState.engine,
+                    onError = { error ->
+
+                    }
                 )
 
                 Text(
@@ -75,9 +73,7 @@ fun AndroidSample() {
                     style = MaterialTheme.typography.bodyMedium
                 )
             }
-        } else {
-            Text("Vulkan not supported on this device/emulator")
-        }
+
     }
 }
 

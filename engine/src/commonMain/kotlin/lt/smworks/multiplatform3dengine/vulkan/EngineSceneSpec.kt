@@ -8,10 +8,25 @@ import androidx.compose.runtime.snapshots.SnapshotStateMap
 
 @Stable
 data class EngineSceneSpec(
-    val cameraDistance: Float = 0f,
+    val cameraPosition: EngineCameraPosition = EngineCameraPosition(),
+    val cameraRotation: EngineCameraRotation = EngineCameraRotation(),
     val models: List<EngineModelHandleRef> = emptyList(),
     val fpsSamplePeriodMs: Long = 250L,
     val onUpdate: (EngineSceneUpdateScope.() -> Unit)? = null
+)
+
+@Stable
+data class EngineCameraPosition(
+    val x: Float = 0f,
+    val y: Float = 0f,
+    val z: Float = 4f
+)
+
+@Stable
+data class EngineCameraRotation(
+    val x: Float = 0f,
+    val y: Float = 0f,
+    val z: Float = 0f
 )
 
 @Stable
@@ -80,10 +95,19 @@ class EngineSceneState internal constructor(
 }
 
 class EngineSceneBuilder {
-    var cameraDistance: Float = 0f
+    private var cameraPosition = EngineCameraPosition()
+    private var cameraRotation = EngineCameraRotation()
     var fpsSamplePeriodMs: Long = 250L
     private val modelRefs = mutableListOf<EngineModelHandleRef>()
     private var onUpdate: (EngineSceneUpdateScope.() -> Unit)? = null
+
+    fun cameraPosition(x: Float = 0f, y: Float = 0f, z: Float = 4f) {
+        cameraPosition = EngineCameraPosition(x, y, z)
+    }
+
+    fun cameraRotation(x: Float = 0f, y: Float = 0f, z: Float = 0f) {
+        cameraRotation = EngineCameraRotation(x, y, z)
+    }
 
     fun model(assetPath: String, block: EngineModelBuilder.() -> Unit = {}): EngineModelHandleRef {
         val builder = EngineModelBuilder(assetPath).apply(block)
@@ -97,7 +121,8 @@ class EngineSceneBuilder {
 
     fun build(): EngineSceneSpec {
         return EngineSceneSpec(
-            cameraDistance = cameraDistance,
+            cameraPosition = cameraPosition,
+            cameraRotation = cameraRotation,
             models = modelRefs.toList(),
             fpsSamplePeriodMs = fpsSamplePeriodMs,
             onUpdate = onUpdate
