@@ -1,13 +1,13 @@
 This is a Kotlin Multiplatform project targeting Android and iOS.
 
-* [/composeApp](./composeApp/src) is for code that will be shared across your Android and iOS applications.
-  It contains several subfolders:
-    - [commonMain](./composeApp/src/commonMain/kotlin) is for shared Kotlin code.
-    - [androidMain](./composeApp/src/androidMain/kotlin) contains Android-specific implementations.
-    - [iosMain](./composeApp/src/iosMain/kotlin) contains iOS-specific implementations (for example, CoreCrypto calls).
+* [`/engine`](./engine/src) is the multiplatform rendering engine. This module is the one you package and ship as a library.
 
-* [/iosApp](./iosApp/iosApp) contains iOS applications. Even if you’re sharing your UI with Compose Multiplatform,
-  you need this entry point for your iOS app. This is also where you should add SwiftUI code for your project.
+* [`/composeApp`](./composeApp/src) is a demo client that exercises the engine with a Compose Multiplatform UI. It contains several subfolders:
+    - [`commonMain`](./composeApp/src/commonMain/kotlin) holds the shared Kotlin code used by the demo.
+    - [`androidMain`](./composeApp/src/androidMain/kotlin) contains Android-specific demo implementations.
+    - [`iosMain`](./composeApp/src/iosMain/kotlin) contains iOS-specific demo implementations (for example, CoreCrypto calls).
+
+* [`/iosApp`](./iosApp/iosApp) is a demo iOS application that integrates the engine. Open it in Xcode to run the demo or add SwiftUI experiments.
 
 ### Build and Run Android Application
 
