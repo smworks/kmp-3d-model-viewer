@@ -17,6 +17,12 @@ actual class EngineAPI actual constructor() {
     private var currentFps = 0
     private var frameCounter = 0L
     private var lastFpsTimestamp = 0L
+    @Volatile
+    private var pendingResizeWidth = 0
+    @Volatile
+    private var pendingResizeHeight = 0
+    @Volatile
+    private var hasPendingResize = false
 
     private data class ModelState(
         val id: Long,
@@ -47,6 +53,7 @@ actual class EngineAPI actual constructor() {
         nativeInit(surface, assetManager)
         isNativeReady = true
         restoreSceneState()
+        applyPendingResize()
     }
 
     fun start() {
@@ -69,7 +76,16 @@ actual class EngineAPI actual constructor() {
     }
 
     fun resize(width: Int, height: Int) {
-        nativeResize(width, height)
+        if (width <= 0 || height <= 0) {
+            return
+        }
+        if (isNativeReady) {
+            nativeResize(width, height)
+        } else {
+            pendingResizeWidth = width
+            pendingResizeHeight = height
+            hasPendingResize = true
+        }
     }
 
     fun rotateCamera(yaw: Float, pitch: Float, roll: Float) {
@@ -171,6 +187,7 @@ actual class EngineAPI actual constructor() {
         nativeDestroy()
         isNativeReady = false
         setSharedAssetManager(null)
+        hasPendingResize = false
     }
 
     private fun recordFrame() {
@@ -271,6 +288,18 @@ actual class EngineAPI actual constructor() {
 
             return output
         }
+    }
+
+    private fun applyPendingResize() {
+        if (!hasPendingResize) {
+            return
+        }
+        val width = pendingResizeWidth
+        val height = pendingResizeHeight
+        if (width > 0 && height > 0 && isNativeReady) {
+            nativeResize(width, height)
+        }
+        hasPendingResize = false
     }
 }
 

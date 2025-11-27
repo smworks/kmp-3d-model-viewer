@@ -1,5 +1,6 @@
 package lt.smworks.multiplatform3dengine.vulkan
 
+import android.util.Log
 import android.view.Surface
 import android.view.SurfaceHolder
 import android.view.SurfaceView
@@ -21,10 +22,10 @@ import kotlin.math.PI
 
 actual typealias VulkanRenderTarget = Surface
 
-// Store the current renderer instance for gesture handling
+private const val LOG_TAG = "VulkanScreen"
+
 private var currentRenderer: EngineAPI? = null
 
-// Function to set the current renderer (called from EngineAPI)
 internal fun setCurrentRendererForGestures(renderer: EngineAPI) {
     currentRenderer = renderer
 }
@@ -40,25 +41,66 @@ actual fun VulkanScreen(
     if (supported) {
         AndroidView(
             modifier = modifier,
-            factory = { context ->
-                SurfaceView(context).apply {
+            factory = { viewContext ->
+                SurfaceView(viewContext).apply {
                     var lastTouchX = 0f
                     var lastTouchY = 0f
                     var activePointerId = MotionEvent.INVALID_POINTER_ID
+                    var lastSurfaceWidth = -1
+                    var lastSurfaceHeight = -1
+                    var lastLayoutWidth = -1
+                    var lastLayoutHeight = -1
+                    var lastOrientation: String? = null
+
+                    addOnLayoutChangeListener { _, left, top, right, bottom, _, _, _, _ ->
+                        val layoutWidth = right - left
+                        val layoutHeight = bottom - top
+                        if (layoutWidth <= 0 || layoutHeight <= 0) {
+                            return@addOnLayoutChangeListener
+                        }
+                        if (layoutWidth != lastLayoutWidth || layoutHeight != lastLayoutHeight) {
+                            lastLayoutWidth = layoutWidth
+                            lastLayoutHeight = layoutHeight
+                            Log.i(LOG_TAG, "Layout changed to ${layoutWidth}x$layoutHeight")
+                            engine.resize(layoutWidth, layoutHeight)
+                        }
+                    }
 
                     holder.addCallback(object : SurfaceHolder.Callback {
                         override fun surfaceCreated(holder: SurfaceHolder) {
                             val surface = holder.surface
                             if (surface != null && surface.isValid) {
-                                engine.init(surface, context.assets)
+                                engine.init(surface, viewContext.assets)
                                 engine.start()
                             }
                         }
 
                         override fun surfaceChanged(holder: SurfaceHolder, format: Int, width: Int, height: Int) {
+                            val orientation = when {
+                                width > height -> "landscape"
+                                height > width -> "portrait"
+                                else -> "square"
+                            }
+
+                            if (orientation != lastOrientation) {
+                                Log.i(LOG_TAG, "Orientation changed to $orientation (width=$width, height=$height)")
+                                lastOrientation = orientation
+                            }
+
+                            if (width != lastSurfaceWidth || height != lastSurfaceHeight) {
+                                engine.resize(width, height)
+                                lastSurfaceWidth = width
+                                lastSurfaceHeight = height
+                                Log.i(LOG_TAG, "Surface resized to ${width}x$height")
+                            }
                         }
 
                         override fun surfaceDestroyed(holder: SurfaceHolder) {
+                            lastSurfaceWidth = -1
+                            lastSurfaceHeight = -1
+                            lastLayoutWidth = -1
+                            lastLayoutHeight = -1
+                            lastOrientation = null
                             engine.destroy()
                         }
                     })
@@ -98,7 +140,7 @@ actual fun VulkanScreen(
                                 lastTouchX = currentX
                                 lastTouchY = currentY
 
-                                val sensitivity = 0.001f // radians per pixel
+                                val sensitivity = 0.001f
 
                                 currentRenderer?.let { renderer ->
                                     val absDeltaX = abs(deltaX)

@@ -82,6 +82,7 @@ struct VulkanState {
 	size_t currentFrame = 0;
 	bool initialized = false;
 	Camera camera;
+	VkSurfaceTransformFlagBitsKHR surfaceTransform = VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR;
 	std::vector<GpuModel> models;
 	VkDescriptorSetLayout textureDescriptorSetLayout = VK_NULL_HANDLE;
 	VkDescriptorPool textureDescriptorPool = VK_NULL_HANDLE;
@@ -93,6 +94,38 @@ struct VulkanState {
 
 static VulkanState g;
 static std::mutex g_stateMutex;
+
+static const char* surfaceTransformName(VkSurfaceTransformFlagBitsKHR transform) {
+	switch (transform) {
+	case VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR: return "IDENTITY";
+	case VK_SURFACE_TRANSFORM_ROTATE_90_BIT_KHR: return "ROTATE_90";
+	case VK_SURFACE_TRANSFORM_ROTATE_180_BIT_KHR: return "ROTATE_180";
+	case VK_SURFACE_TRANSFORM_ROTATE_270_BIT_KHR: return "ROTATE_270";
+	case VK_SURFACE_TRANSFORM_HORIZONTAL_MIRROR_BIT_KHR: return "MIRROR_HORIZONTAL";
+	case VK_SURFACE_TRANSFORM_HORIZONTAL_MIRROR_ROTATE_90_BIT_KHR: return "MIRROR_HORIZONTAL_ROTATE_90";
+	case VK_SURFACE_TRANSFORM_HORIZONTAL_MIRROR_ROTATE_180_BIT_KHR: return "MIRROR_HORIZONTAL_ROTATE_180";
+	case VK_SURFACE_TRANSFORM_HORIZONTAL_MIRROR_ROTATE_270_BIT_KHR: return "MIRROR_HORIZONTAL_ROTATE_270";
+	case VK_SURFACE_TRANSFORM_INHERIT_BIT_KHR: return "INHERIT";
+	default: return "UNKNOWN";
+	}
+}
+
+static bool isDimensionSwapTransform(VkSurfaceTransformFlagBitsKHR transform) {
+	return transform == VK_SURFACE_TRANSFORM_ROTATE_90_BIT_KHR ||
+		transform == VK_SURFACE_TRANSFORM_ROTATE_270_BIT_KHR ||
+		transform == VK_SURFACE_TRANSFORM_HORIZONTAL_MIRROR_ROTATE_90_BIT_KHR ||
+		transform == VK_SURFACE_TRANSFORM_HORIZONTAL_MIRROR_ROTATE_270_BIT_KHR;
+}
+
+static VkExtent2D resolveDisplayExtent(const VkExtent2D& extent, VkSurfaceTransformFlagBitsKHR transform) {
+	if (!isDimensionSwapTransform(transform)) {
+		return extent;
+	}
+	VkExtent2D resolved{};
+	resolved.width = extent.height;
+	resolved.height = extent.width;
+	return resolved;
+}
 
 static GpuModel* findModelById(int64_t modelId) {
 	for (auto& model : g.models) {
@@ -565,6 +598,7 @@ static void createDepthResources() {
 			VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL, aspect);
 		g.depthImageViews[i] = createImageView(g.depthImages[i], g.depthFormat, aspect);
 	}
+	LOGI("Depth resources recreated for %zu images at %ux%u format=%d", g.swapchainImages.size(), g.swapchainExtent.width, g.swapchainExtent.height, g.depthFormat);
 }
 
 static size_t getDefaultTextureIndex() {
@@ -732,6 +766,9 @@ static void createCommandPoolBuffers() {
 }
 
 static void recordCommandBuffers() {
+	const VkExtent2D displayExtent = resolveDisplayExtent(g.swapchainExtent, g.surfaceTransform);
+	const float displayWidth = static_cast<float>(displayExtent.width);
+	const float displayHeight = static_cast<float>(displayExtent.height);
 	for (size_t i = 0; i < g.commandBuffers.size(); ++i) {
 		VkCommandBufferBeginInfo bi{};
 		bi.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
@@ -761,8 +798,8 @@ static void recordCommandBuffers() {
 				g.camera.getYaw(),
 				g.camera.getPitch(),
 				g.camera.getRoll(),
-				g.camera.getWidth(),
-				g.camera.getHeight(),
+				displayWidth,
+				displayHeight,
 				g.camera.getPositionX(),
 				g.camera.getPositionY(),
 				g.camera.getPositionZ(),
@@ -858,6 +895,7 @@ static void recreateSwapchain(uint32_t width, uint32_t height) {
 	g.swapchain = g.builder->getSwapchain();
 	g.swapchainFormat = g.builder->getSwapchainFormat();
 	g.swapchainExtent = g.builder->getSwapchainExtent();
+	g.surfaceTransform = g.builder->getSurfaceTransform();
 	g.swapchainImages = g.builder->getSwapchainImages();
 	g.swapchainImageViews = g.builder->getSwapchainImageViews();
 	g.camera.updateViewport(g.swapchainExtent);
@@ -870,6 +908,13 @@ static void recreateSwapchain(uint32_t width, uint32_t height) {
 	createCommandPoolBuffers();
 	recordCommandBuffers();
 	createSyncObjects();
+	const VkExtent2D displayExtent = resolveDisplayExtent(g.swapchainExtent, g.surfaceTransform);
+	LOGI("Swapchain recreated requested=%ux%u actual=%ux%u display=%ux%u imageCount=%zu transform=%s (%u)",
+		width, height,
+		g.swapchainExtent.width, g.swapchainExtent.height,
+		displayExtent.width, displayExtent.height,
+		g.swapchainImages.size(),
+		surfaceTransformName(g.surfaceTransform), g.surfaceTransform);
 }
 
 JNIEXPORT void JNICALL
@@ -914,6 +959,7 @@ Java_lt_smworks_multiplatform3dengine_vulkan_EngineAPI_nativeInit(JNIEnv* env, j
 	g.swapchain = g.builder->getSwapchain();
 	g.swapchainFormat = g.builder->getSwapchainFormat();
 	g.swapchainExtent = g.builder->getSwapchainExtent();
+	g.surfaceTransform = g.builder->getSurfaceTransform();
 	g.swapchainImages = g.builder->getSwapchainImages();
 	g.swapchainImageViews = g.builder->getSwapchainImageViews();
 	g.camera.updateViewport(g.swapchainExtent);
@@ -929,7 +975,13 @@ Java_lt_smworks_multiplatform3dengine_vulkan_EngineAPI_nativeInit(JNIEnv* env, j
 	recordCommandBuffers();
 	createSyncObjects();
 	g.initialized = true;
-	LOGI("Vulkan initialized w=%u h=%u", width, height);
+	const VkExtent2D displayExtent = resolveDisplayExtent(g.swapchainExtent, g.surfaceTransform);
+	LOGI("Vulkan initialized w=%u h=%u swapchain=%ux%u display=%ux%u aspect=%.3f transform=%s (%u)",
+		width, height,
+		g.swapchainExtent.width, g.swapchainExtent.height,
+		displayExtent.width, displayExtent.height,
+		(displayExtent.height > 0) ? static_cast<float>(displayExtent.width) / static_cast<float>(displayExtent.height) : 0.0f,
+		surfaceTransformName(g.surfaceTransform), g.surfaceTransform);
 }
 
 JNIEXPORT void JNICALL
@@ -937,6 +989,13 @@ Java_lt_smworks_multiplatform3dengine_vulkan_EngineAPI_nativeResize(JNIEnv* env,
 	if (!g.initialized) return;
 	if (width <= 0 || height <= 0) return;
 	recreateSwapchain(static_cast<uint32_t>(width), static_cast<uint32_t>(height));
+	const VkExtent2D displayExtent = resolveDisplayExtent(g.swapchainExtent, g.surfaceTransform);
+	LOGI("Resize requested w=%d h=%d resulting swapchain=%ux%u display=%ux%u aspect=%.3f transform=%s (%u)",
+		width, height,
+		g.swapchainExtent.width, g.swapchainExtent.height,
+		displayExtent.width, displayExtent.height,
+		(displayExtent.height > 0) ? static_cast<float>(displayExtent.width) / static_cast<float>(displayExtent.height) : 0.0f,
+		surfaceTransformName(g.surfaceTransform), g.surfaceTransform);
 }
 
 JNIEXPORT void JNICALL
@@ -1091,6 +1150,9 @@ Java_lt_smworks_multiplatform3dengine_vulkan_EngineAPI_nativeRender(JNIEnv* env,
 	// Apply camera viewport/scissor
 	g.camera.applyToCommandBuffer(g.commandBuffers[imageIndex]);
 	vkCmdBindPipeline(g.commandBuffers[imageIndex], VK_PIPELINE_BIND_POINT_GRAPHICS, g.graphicsPipeline);
+	const VkExtent2D displayExtent = resolveDisplayExtent(g.swapchainExtent, g.surfaceTransform);
+	const float displayWidth = static_cast<float>(displayExtent.width);
+	const float displayHeight = static_cast<float>(displayExtent.height);
 	for (const auto& model : g.models) {
 		if (!model.cpu.hasGeometry() || !model.vertexBuffer || !model.indexBuffer) {
 			continue;
@@ -1100,8 +1162,8 @@ Java_lt_smworks_multiplatform3dengine_vulkan_EngineAPI_nativeRender(JNIEnv* env,
 			g.camera.getYaw(),
 			g.camera.getPitch(),
 			g.camera.getRoll(),
-			g.camera.getWidth(),
-			g.camera.getHeight(),
+			displayWidth,
+			displayHeight,
 			g.camera.getPositionX(),
 			g.camera.getPositionY(),
 			g.camera.getPositionZ(),

@@ -38,6 +38,7 @@ public:
 	VkSwapchainKHR getSwapchain() const { return swapchain; }
 	VkFormat getSwapchainFormat() const { return swapchainFormat; }
 	VkExtent2D getSwapchainExtent() const { return swapchainExtent; }
+	VkSurfaceTransformFlagBitsKHR getSurfaceTransform() const { return surfaceTransform; }
 	const std::vector<VkImage>& getSwapchainImages() const { return swapchainImages; }
 	const std::vector<VkImageView>& getSwapchainImageViews() const { return swapchainImageViews; }
 	VkRenderPass getRenderPass() const { return renderPass; }
@@ -66,6 +67,7 @@ private:
 	std::vector<VkImage> swapchainImages;
 	std::vector<VkImageView> swapchainImageViews;
 	VkFormat depthFormat = VK_FORMAT_UNDEFINED;
+	VkSurfaceTransformFlagBitsKHR surfaceTransform = VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR;
 
 	VkRenderPass renderPass = VK_NULL_HANDLE;
 	VkPipelineLayout pipelineLayout = VK_NULL_HANDLE;

@@ -1,5 +1,6 @@
 #include "Camera.h"
 #include <algorithm>
+#include <android/log.h>
 
 namespace {
 constexpr float kPi = 3.14159265359f;
@@ -7,6 +8,7 @@ constexpr float kTwoPi = 2.0f * kPi;
 constexpr float kMaxPitch = kPi / 2.0f - 0.1f; // ~89 degrees
 constexpr float kMinCameraZ = 1.0f;
 constexpr float kMaxCameraZ = 50.0f;
+constexpr const char* kCameraLogTag = "VKRenderer";
 }
 
 Camera::Camera() {
@@ -38,6 +40,9 @@ void Camera::updateViewport(const VkExtent2D& extent) {
 	
 	oScissor.offset = {0, 0};
 	oScissor.extent = extent;
+
+	__android_log_print(ANDROID_LOG_INFO, kCameraLogTag, "Camera viewport updated width=%.1f height=%.1f aspect=%.3f",
+		oViewport.width, oViewport.height, (oViewport.height > 0.0f) ? oViewport.width / oViewport.height : 0.0f);
 }
 
 void Camera::applyToCommandBuffer(VkCommandBuffer commandBuffer) const {

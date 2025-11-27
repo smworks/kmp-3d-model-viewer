@@ -5,6 +5,23 @@
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO, LOG_TAG, __VA_ARGS__)
 #define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, LOG_TAG, __VA_ARGS__)
 
+namespace {
+const char* transformToString(VkSurfaceTransformFlagBitsKHR transform) {
+	switch (transform) {
+	case VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR: return "IDENTITY";
+	case VK_SURFACE_TRANSFORM_ROTATE_90_BIT_KHR: return "ROTATE_90";
+	case VK_SURFACE_TRANSFORM_ROTATE_180_BIT_KHR: return "ROTATE_180";
+	case VK_SURFACE_TRANSFORM_ROTATE_270_BIT_KHR: return "ROTATE_270";
+	case VK_SURFACE_TRANSFORM_HORIZONTAL_MIRROR_BIT_KHR: return "MIRROR_HORIZONTAL";
+	case VK_SURFACE_TRANSFORM_HORIZONTAL_MIRROR_ROTATE_90_BIT_KHR: return "MIRROR_HORIZONTAL_ROTATE_90";
+	case VK_SURFACE_TRANSFORM_HORIZONTAL_MIRROR_ROTATE_180_BIT_KHR: return "MIRROR_HORIZONTAL_ROTATE_180";
+	case VK_SURFACE_TRANSFORM_HORIZONTAL_MIRROR_ROTATE_270_BIT_KHR: return "MIRROR_HORIZONTAL_ROTATE_270";
+	case VK_SURFACE_TRANSFORM_INHERIT_BIT_KHR: return "INHERIT";
+	default: return "UNKNOWN";
+	}
+}
+}
+
 void VulkanBuilder::check(VkResult r, const char* what) {
 	if (r != VK_SUCCESS) {
 		LOGE("Vulkan error %d at %s", r, what);
@@ -93,6 +110,17 @@ VulkanBuilder& VulkanBuilder::buildDeviceAndQueue() {
 VulkanBuilder& VulkanBuilder::buildSwapchain(uint32_t width, uint32_t height) {
 	VkSurfaceCapabilitiesKHR caps{};
 	check(vkGetPhysicalDeviceSurfaceCapabilitiesKHR(physicalDevice, surface, &caps), "vkGetPhysicalDeviceSurfaceCapabilitiesKHR");
+	LOGI("Surface capabilities currentExtent=%ux%u minExtent=%ux%u maxExtent=%ux%u currentTransform=%u supportedTransforms=%u",
+		caps.currentExtent.width, caps.currentExtent.height,
+		caps.minImageExtent.width, caps.minImageExtent.height,
+		caps.maxImageExtent.width, caps.maxImageExtent.height,
+		caps.currentTransform, caps.supportedTransforms);
+	surfaceTransform = caps.currentTransform;
+	if (caps.supportedTransforms & VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR) {
+		// Prefer identity if available to avoid implicit rotations when presenting.
+		surfaceTransform = VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR;
+	}
+	LOGI("Using surface preTransform=%s (%u)", transformToString(surfaceTransform), surfaceTransform);
 
 	uint32_t formatCount = 0;
 	check(vkGetPhysicalDeviceSurfaceFormatsKHR(physicalDevice, surface, &formatCount, nullptr), "vkGetPhysicalDeviceSurfaceFormatsKHR(count)");
@@ -126,7 +154,7 @@ VulkanBuilder& VulkanBuilder::buildSwapchain(uint32_t width, uint32_t height) {
 	sci.imageArrayLayers = 1;
 	sci.imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
 	sci.imageSharingMode = VK_SHARING_MODE_EXCLUSIVE;
-	sci.preTransform = caps.currentTransform;
+	sci.preTransform = surfaceTransform;
 	sci.compositeAlpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
 	sci.presentMode = chosenPresent;
 	sci.clipped = VK_TRUE;
