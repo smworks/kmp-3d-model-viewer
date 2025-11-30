@@ -24,7 +24,7 @@ private const val SCALE_STEP = 0.0005f
 private const val ROTATE_STEP = 0.05f
 
 @Composable
-fun EngineModelControls(
+fun ModelControls(
     models: List<EngineModelHandle>,
     modifier: Modifier = Modifier
 ) {

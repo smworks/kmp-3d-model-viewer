@@ -7,11 +7,10 @@ import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.systemBarsPadding
-import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.systemBarsPadding
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -23,6 +22,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.unit.dp
+import lt.smworks.multiplatform3dengine.vulkan.EngineSceneState
 import lt.smworks.multiplatform3dengine.vulkan.VulkanScreen
 import lt.smworks.multiplatform3dengine.vulkan.rememberEngineScene
 
@@ -47,7 +47,7 @@ fun AndroidSample() {
                 scale(0.001f)
             }
             scene.onUpdate {
-                rotateBy(0.001f, 0.006f, 0.0f)
+//                rotateBy(0.001f, 0.006f, 0.0f)
             }
         }
         val modelHandles = sceneState.models.values.toList()
@@ -58,38 +58,45 @@ fun AndroidSample() {
                 .fillMaxSize()
                 .systemBarsPadding()
         ) {
-            Box(
-                modifier = Modifier
-                    .weight(1f)
-                    .fillMaxSize()
-            ) {
-                VulkanScreen(
-                    modifier = Modifier.fillMaxSize(),
-                    engine = sceneState.engine
-                )
-
-                Text(
-                    text = "$fps FPS",
-                    modifier = Modifier
-                        .align(Alignment.TopEnd)
-                        .padding(16.dp)
-                        .background(
-                            color = Color(0x66000000),
-                            shape = RoundedCornerShape(8.dp)
-                        )
-                        .padding(horizontal = 12.dp, vertical = 6.dp),
-                    color = Color.White,
-                    style = MaterialTheme.typography.bodyMedium
-                )
-            }
-
-            EngineModelControls(
+            ModelPreview(sceneState, fps)
+            ModelControls(
                 models = modelHandles,
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(horizontal = 16.dp, vertical = 12.dp)
             )
         }
+    }
+}
+
+@Composable
+private fun ColumnScope.ModelPreview(
+    sceneState: EngineSceneState,
+    fps: Int
+) {
+    Box(
+        modifier = Modifier
+            .weight(1f)
+            .fillMaxSize()
+    ) {
+        VulkanScreen(
+            modifier = Modifier.fillMaxSize(),
+            engine = sceneState.engine
+        )
+
+        Text(
+            text = "$fps FPS",
+            modifier = Modifier
+                .align(Alignment.TopEnd)
+                .padding(16.dp)
+                .background(
+                    color = Color(0x66000000),
+                    shape = RoundedCornerShape(8.dp)
+                )
+                .padding(horizontal = 12.dp, vertical = 6.dp),
+            color = Color.White,
+            style = MaterialTheme.typography.bodyMedium
+        )
     }
 }
 
