@@ -31,7 +31,6 @@ class MainViewModel : ViewModel() {
 
     fun onUpdate() {
         val model = scene.getModel(MODEL_ID) ?: return
-        scene.updateModel(model)
     }
 
     fun translateModels(deltaX: Float, deltaY: Float, deltaZ: Float) {
