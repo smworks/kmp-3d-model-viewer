@@ -6,5 +6,6 @@ import androidx.compose.ui.Modifier
 @Composable
 expect fun VulkanScreen(
 	modifier: Modifier = Modifier,
-	engine: EngineAPI
+	renderState: SceneRenderState,
+	onUpdate: () -> Unit = {}
 )

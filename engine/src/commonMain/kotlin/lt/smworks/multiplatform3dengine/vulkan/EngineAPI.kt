@@ -12,6 +12,7 @@ expect class EngineAPI() {
     fun scale(modelId: Long, scale: Float)
     fun scaleBy(modelId: Long, delta: Float)
     fun getFps(): Int
+    fun setOnFrameUpdate(callback: (() -> Unit)?)
 }
 
 

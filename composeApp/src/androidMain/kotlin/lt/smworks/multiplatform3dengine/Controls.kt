@@ -17,18 +17,19 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.unit.dp
-import lt.smworks.multiplatform3dengine.vulkan.EngineModelHandle
-
 private const val TRANSLATE_STEP = 0.05f
 private const val SCALE_STEP = 0.0005f
 private const val ROTATE_STEP = 0.05f
 
 @Composable
 fun ModelControls(
-    models: List<EngineModelHandle>,
+    hasModels: Boolean,
+    onTranslate: (Float, Float, Float) -> Unit,
+    onScale: (Float) -> Unit,
+    onRotate: (Float, Float, Float) -> Unit,
     modifier: Modifier = Modifier
 ) {
-    if (models.isEmpty()) {
+    if (!hasModels) {
         return
     }
 
@@ -41,15 +42,15 @@ fun ModelControls(
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
         TranslateControls(
-            models = models,
+            onTranslate = onTranslate,
             modifier = Modifier.fillMaxWidth()
         )
         ScaleControls(
-            models = models,
+            onScale = onScale,
             modifier = Modifier.fillMaxWidth()
         )
         RotateControls(
-            models = models,
+            onRotate = onRotate,
             modifier = Modifier.fillMaxWidth()
         )
     }
@@ -57,7 +58,7 @@ fun ModelControls(
 
 @Composable
 private fun TranslateControls(
-    models: List<EngineModelHandle>,
+    onTranslate: (Float, Float, Float) -> Unit,
     modifier: Modifier = Modifier
 ) {
     Column(
@@ -73,42 +74,30 @@ private fun TranslateControls(
             label = "X",
             modifier = Modifier.fillMaxWidth(),
             onDecrement = {
-                models.forEach { handle ->
-                    handle.translateBy(-TRANSLATE_STEP, 0f, 0f)
-                }
+                onTranslate(-TRANSLATE_STEP, 0f, 0f)
             },
             onIncrement = {
-                models.forEach { handle ->
-                    handle.translateBy(TRANSLATE_STEP, 0f, 0f)
-                }
+                onTranslate(TRANSLATE_STEP, 0f, 0f)
             }
         )
         ControlRow(
             label = "Y",
             modifier = Modifier.fillMaxWidth(),
             onDecrement = {
-                models.forEach { handle ->
-                    handle.translateBy(0f, -TRANSLATE_STEP, 0f)
-                }
+                onTranslate(0f, -TRANSLATE_STEP, 0f)
             },
             onIncrement = {
-                models.forEach { handle ->
-                    handle.translateBy(0f, TRANSLATE_STEP, 0f)
-                }
+                onTranslate(0f, TRANSLATE_STEP, 0f)
             }
         )
         ControlRow(
             label = "Z",
             modifier = Modifier.fillMaxWidth(),
             onDecrement = {
-                models.forEach { handle ->
-                    handle.translateBy(0f, 0f, -TRANSLATE_STEP)
-                }
+                onTranslate(0f, 0f, -TRANSLATE_STEP)
             },
             onIncrement = {
-                models.forEach { handle ->
-                    handle.translateBy(0f, 0f, TRANSLATE_STEP)
-                }
+                onTranslate(0f, 0f, TRANSLATE_STEP)
             }
         )
     }
@@ -116,7 +105,7 @@ private fun TranslateControls(
 
 @Composable
 private fun ScaleControls(
-    models: List<EngineModelHandle>,
+    onScale: (Float) -> Unit,
     modifier: Modifier = Modifier
 ) {
     Column(
@@ -132,14 +121,10 @@ private fun ScaleControls(
             label = "Uniform",
             modifier = Modifier.fillMaxWidth(),
             onDecrement = {
-                models.forEach { handle ->
-                    handle.scaleBy(-SCALE_STEP)
-                }
+                onScale(-SCALE_STEP)
             },
             onIncrement = {
-                models.forEach { handle ->
-                    handle.scaleBy(SCALE_STEP)
-                }
+                onScale(SCALE_STEP)
             }
         )
     }
@@ -147,7 +132,7 @@ private fun ScaleControls(
 
 @Composable
 private fun RotateControls(
-    models: List<EngineModelHandle>,
+    onRotate: (Float, Float, Float) -> Unit,
     modifier: Modifier = Modifier
 ) {
     Column(
@@ -163,42 +148,30 @@ private fun RotateControls(
             label = "X",
             modifier = Modifier.fillMaxWidth(),
             onDecrement = {
-                models.forEach { handle ->
-                    handle.rotateBy(-ROTATE_STEP, 0f, 0f)
-                }
+                onRotate(-ROTATE_STEP, 0f, 0f)
             },
             onIncrement = {
-                models.forEach { handle ->
-                    handle.rotateBy(ROTATE_STEP, 0f, 0f)
-                }
+                onRotate(ROTATE_STEP, 0f, 0f)
             }
         )
         ControlRow(
             label = "Y",
             modifier = Modifier.fillMaxWidth(),
             onDecrement = {
-                models.forEach { handle ->
-                    handle.rotateBy(0f, -ROTATE_STEP, 0f)
-                }
+                onRotate(0f, -ROTATE_STEP, 0f)
             },
             onIncrement = {
-                models.forEach { handle ->
-                    handle.rotateBy(0f, ROTATE_STEP, 0f)
-                }
+                onRotate(0f, ROTATE_STEP, 0f)
             }
         )
         ControlRow(
             label = "Z",
             modifier = Modifier.fillMaxWidth(),
             onDecrement = {
-                models.forEach { handle ->
-                    handle.rotateBy(0f, 0f, -ROTATE_STEP)
-                }
+                onRotate(0f, 0f, -ROTATE_STEP)
             },
             onIncrement = {
-                models.forEach { handle ->
-                    handle.rotateBy(0f, 0f, ROTATE_STEP)
-                }
+                onRotate(0f, 0f, ROTATE_STEP)
             }
         )
     }

@@ -23,6 +23,8 @@ actual class EngineAPI actual constructor() {
     private var pendingResizeHeight = 0
     @Volatile
     private var hasPendingResize = false
+    @Volatile
+    private var frameUpdateCallback: (() -> Unit)? = null
 
     private data class ModelState(
         val id: Long,
@@ -61,6 +63,7 @@ actual class EngineAPI actual constructor() {
         thread = Thread {
             while (running.get()) {
                 nativeRender()
+                frameUpdateCallback?.invoke()
                 recordFrame()
             }
         }.apply { start() }
@@ -98,6 +101,9 @@ actual class EngineAPI actual constructor() {
     }
 
     actual fun getFps(): Int = currentFps
+    actual fun setOnFrameUpdate(callback: (() -> Unit)?) {
+        frameUpdateCallback = callback
+    }
 
     actual fun loadModel(modelName: String, x: Float, y: Float, z: Float, scale: Float): Long {
         val modelId = modelIdGenerator.getAndIncrement()
@@ -188,6 +194,7 @@ actual class EngineAPI actual constructor() {
         isNativeReady = false
         setSharedAssetManager(null)
         hasPendingResize = false
+        frameUpdateCallback = null
     }
 
     private fun recordFrame() {

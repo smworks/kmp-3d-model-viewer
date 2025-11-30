@@ -12,6 +12,9 @@ import androidx.compose.ui.viewinterop.AndroidView
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
+import kotlinx.coroutines.channels.BufferOverflow
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.launch
 import kotlin.math.PI
 
@@ -27,10 +30,27 @@ internal fun setCurrentRendererForGestures(renderer: EngineAPI) {
 @Composable
 actual fun VulkanScreen(
     modifier: Modifier,
-    engine: EngineAPI
+    renderState: SceneRenderState,
+    onUpdate: () -> Unit
 ) {
+    val engine = renderState.engine
     val context = LocalContext.current
     val supported = remember { VulkanSupport.isSupported(context) }
+    DisposableEffect(engine, renderState) {
+        engine.setOnFrameUpdate {
+            renderState.notifyFrameRendered()
+        }
+        onDispose {
+            engine.setOnFrameUpdate(null)
+        }
+    }
+
+    LaunchedEffect(renderState, onUpdate) {
+        renderState.frameUpdates.collect {
+            onUpdate()
+        }
+    }
+
     if (supported) {
         AndroidView(
             modifier = modifier,
@@ -121,110 +141,119 @@ fun rememberEngineApi(): EngineAPI {
 }
 
 @Composable
-fun rememberEngineScene(
-    block: EngineSceneBuilder.() -> Unit
-): EngineSceneState {
-    val sceneSpec = engineScene(block)
-    return rememberEngineScene(sceneSpec)
-}
-
-@Composable
-fun rememberEngineScene(
-    sceneSpec: EngineSceneSpec
-): EngineSceneState {
+fun rememberSceneRenderer(
+    scene: Scene
+): SceneRenderState {
     val engine = rememberEngineApi()
     val fpsState = remember { rememberFpsState() }
-    val loadedModels = remember(engine) { mutableStateMapOf<EngineModelHandleRef, EngineModelHandle>() }
-    val rotationJobs = remember(engine) { mutableMapOf<EngineModelHandleRef, Job>() }
-    val modelUpdateJobs = remember(engine) { mutableMapOf<EngineModelHandleRef, ModelUpdateJob>() }
-    val updateScope = remember(engine) { EngineSceneUpdateScope(loadedModels) }
+    val handleMap = remember(engine) { mutableStateMapOf<String, EngineModelHandle>() }
+    val trackedModels = remember(engine) { mutableMapOf<String, TrackedModel>() }
+    val rotationJobs = remember(engine) { mutableMapOf<String, Job>() }
+    val modelUpdateJobs = remember(engine) { mutableMapOf<String, ModelUpdateJob>() }
+    val updateScope = remember(engine) { SceneUpdateScope(handleMap) }
+    val frameUpdates = remember(engine) {
+        MutableSharedFlow<Unit>(
+            extraBufferCapacity = 1,
+            onBufferOverflow = BufferOverflow.DROP_OLDEST
+        )
+    }
 
-    LaunchedEffect(engine, sceneSpec.cameraPosition) {
-        val position = sceneSpec.cameraPosition
+    LaunchedEffect(engine, scene.camera.position) {
+        val position = scene.camera.position
         engine.setCameraPosition(position.x, position.y, position.z)
     }
 
-    LaunchedEffect(engine, sceneSpec.cameraRotation) {
-        val rotation = sceneSpec.cameraRotation
+    LaunchedEffect(engine, scene.camera.rotation) {
+        val rotation = scene.camera.rotation
         engine.setCameraRotation(rotation.x, rotation.y, rotation.z)
     }
 
-    LaunchedEffect(engine, sceneSpec.models, sceneSpec.modelUpdates) {
+    LaunchedEffect(engine, scene.models) {
         val fullRotation = (PI * 2f).toFloat()
-        val activeRefs = sceneSpec.models.toSet()
+        val desiredModels = scene.models.associateBy(SceneModel::id)
 
-        val staleRefs = rotationJobs.keys - activeRefs
-        staleRefs.forEach { ref ->
-            rotationJobs.remove(ref)?.cancel()
+        val staleIds = trackedModels.keys - desiredModels.keys
+        staleIds.forEach { id ->
+            rotationJobs.remove(id)?.cancel()
+            modelUpdateJobs.remove(id)?.job?.cancel()
+            trackedModels.remove(id)
+            handleMap.remove(id)
         }
 
-        val staleUpdateRefs = modelUpdateJobs.keys - activeRefs
-        staleUpdateRefs.forEach { ref ->
-            modelUpdateJobs.remove(ref)?.job?.cancel()
-        }
-
-        loadedModels.keys.toList()
-            .filter { ref -> ref !in activeRefs }
-            .forEach { ref ->
-                loadedModels.remove(ref)
-            }
-
-        sceneSpec.models.forEach { ref ->
-            val spec = ref.spec
-            val translation = spec.translation
-            val handle = loadedModels[ref] ?: run {
-                val modelId = engine.loadModel(
-                    spec.assetPath,
+        desiredModels.forEach { (id, model) ->
+            val tracked = trackedModels[id]
+            val needsReload = tracked == null || tracked.model.assetPath != model.assetPath
+            val handle = if (needsReload) {
+                val translation = model.translation
+                val loadedId = engine.loadModel(
+                    model.assetPath,
                     translation.x,
                     translation.y,
                     translation.z,
-                    spec.scale
+                    model.scale
                 )
                 EngineModelHandle(
-                    id = modelId,
-                    assetPath = spec.assetPath,
+                    id = loadedId,
+                    assetPath = model.assetPath,
                     engine = engine
-                )
+                ).also { newHandle ->
+                    handleMap[id] = newHandle
+                }
+            } else {
+                tracked.handle.also { existing ->
+                    handleMap[id] = existing
+                }
             }
-            loadedModels[ref] = handle
 
-            handle.translateTo(translation.x, translation.y, translation.z)
-            handle.scaleTo(spec.scale)
+            val previousModel = tracked?.model
 
-            val autoRotate = spec.autoRotate
+            if (previousModel == null || previousModel.translation != model.translation) {
+                val translation = model.translation
+                handle.translateTo(translation.x, translation.y, translation.z)
+            }
+
+            if (previousModel == null || previousModel.scale != model.scale) {
+                handle.scaleTo(model.scale)
+            }
+
+            if (previousModel == null || previousModel.rotation != model.rotation) {
+                val rotation = model.rotation
+                handle.rotateTo(rotation.x, rotation.y, rotation.z)
+            }
+
+            val autoRotate = model.autoRotate
             if (autoRotate != null) {
-                val currentJob = rotationJobs[ref]
-                if (currentJob == null || !currentJob.isActive) {
-                    val modelHandle = handle
-                    rotationJobs[ref] = launch {
-                        var rotationX = 0f
-                        var rotationY = 0f
-                        var rotationZ = 0f
-                        val modelId = modelHandle.id
+                val currentJob = rotationJobs[id]
+                if (currentJob == null || !currentJob.isActive || previousModel?.autoRotate != autoRotate) {
+                    currentJob?.cancel()
+                    val speeds = autoRotate.speed
+                    val hasRotation = speeds.x != 0f || speeds.y != 0f || speeds.z != 0f
+                    if (hasRotation) {
+                        val modelHandle = handle
+                        rotationJobs[id] = launch {
+                            var rotationX = model.rotation.x
+                            var rotationY = model.rotation.y
+                            var rotationZ = model.rotation.z
+                            val modelId = modelHandle.id
 
-                        val hasRotation = autoRotate.speedX != 0f ||
-                                autoRotate.speedY != 0f ||
-                                autoRotate.speedZ != 0f
+                            while (isActive) {
+                                rotationX = advanceRotation(rotationX, speeds.x, fullRotation)
+                                rotationY = advanceRotation(rotationY, speeds.y, fullRotation)
+                                rotationZ = advanceRotation(rotationZ, speeds.z, fullRotation)
 
-                        if (!hasRotation) return@launch
-
-                        while (isActive) {
-                            rotationX = advanceRotation(rotationX, autoRotate.speedX, fullRotation)
-                            rotationY = advanceRotation(rotationY, autoRotate.speedY, fullRotation)
-                            rotationZ = advanceRotation(rotationZ, autoRotate.speedZ, fullRotation)
-
-                            engine.rotate(modelId, rotationX, rotationY, rotationZ)
-                            delay(autoRotate.intervalMs)
+                                engine.rotate(modelId, rotationX, rotationY, rotationZ)
+                                delay(autoRotate.intervalMs)
+                            }
                         }
                     }
                 }
             } else {
-                rotationJobs.remove(ref)?.cancel()
+                rotationJobs.remove(id)?.cancel()
             }
 
-            val updateBlock = sceneSpec.modelUpdates[ref]
+            val updateBlock = model.onUpdate
             if (updateBlock != null) {
-                val existingJob = modelUpdateJobs[ref]
+                val existingJob = modelUpdateJobs[id]
                 if (existingJob?.block !== updateBlock || existingJob.job.isActive.not()) {
                     existingJob?.job?.cancel()
                     val modelHandle = handle
@@ -234,37 +263,44 @@ fun rememberEngineScene(
                             delay(MODEL_UPDATE_INTERVAL_MS)
                         }
                     }
-                    modelUpdateJobs[ref] = ModelUpdateJob(updateBlock, job)
+                    modelUpdateJobs[id] = ModelUpdateJob(updateBlock, job)
                 }
             } else {
-                modelUpdateJobs.remove(ref)?.job?.cancel()
+                modelUpdateJobs.remove(id)?.job?.cancel()
             }
+
+            trackedModels[id] = TrackedModel(handle, model)
         }
     }
 
-    LaunchedEffect(engine, sceneSpec.fpsSamplePeriodMs) {
+    LaunchedEffect(engine, scene.fpsSamplePeriodMs) {
         while (isActive) {
             fpsState.value = engine.getFps()
-            delay(sceneSpec.fpsSamplePeriodMs)
+            delay(scene.fpsSamplePeriodMs)
         }
     }
 
-    LaunchedEffect(engine, sceneSpec.onUpdate) {
-        val updater = sceneSpec.onUpdate ?: return@LaunchedEffect
-        while (isActive) {
+    LaunchedEffect(engine, scene.onUpdate) {
+        val updater = scene.onUpdate ?: return@LaunchedEffect
+        frameUpdates.collect {
             updater.invoke(updateScope)
-            delay(MODEL_UPDATE_INTERVAL_MS)
         }
     }
 
     return remember(engine) {
-        EngineSceneState(
+        SceneRenderState(
             engine = engine,
             fpsState = fpsState,
-            modelHandles = loadedModels
+            modelHandles = handleMap,
+            frameUpdates = frameUpdates
         )
     }
 }
+
+private data class TrackedModel(
+    val handle: EngineModelHandle,
+    val model: SceneModel
+)
 
 private data class ModelUpdateJob(
     val block: EngineModelHandle.() -> Unit,

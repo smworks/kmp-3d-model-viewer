@@ -8,7 +8,8 @@ import androidx.compose.ui.Modifier
 @Suppress("UNUSED_PARAMETER")
 actual fun VulkanScreen(
 	modifier: Modifier,
-	engine: EngineAPI
+	renderState: SceneRenderState,
+	onUpdate: () -> Unit = {}
 ) {
 	Text("Vulkan screen is not available on iOS", modifier = modifier)
 }
