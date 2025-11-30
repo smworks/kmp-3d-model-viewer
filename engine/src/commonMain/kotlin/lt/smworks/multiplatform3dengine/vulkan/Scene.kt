@@ -3,7 +3,6 @@ package lt.smworks.multiplatform3dengine.vulkan
 import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.State
 import androidx.compose.runtime.Stable
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.snapshots.SnapshotStateMap
 import kotlinx.coroutines.flow.MutableSharedFlow
 
@@ -105,14 +104,7 @@ data class SceneModel(
     val translation: SceneVector3 = SceneVector3(),
     val rotation: SceneVector3 = SceneVector3(),
     val scale: Float = 1f,
-    val autoRotate: SceneModelAutoRotate? = null,
     val onUpdate: (EngineModelHandle.() -> Unit)? = null
-)
-
-@Stable
-data class SceneModelAutoRotate(
-    val speed: SceneVector3 = SceneVector3(),
-    val intervalMs: Long = 16L
 )
 
 @Stable
@@ -138,9 +130,6 @@ class SceneRenderState internal constructor(
     }
 }
 
-internal fun rememberFpsState(): MutableState<Int> = mutableStateOf(0)
-
-@Stable
 class EngineModelHandle internal constructor(
     val id: Long,
     val assetPath: String,
@@ -168,24 +157,6 @@ class EngineModelHandle internal constructor(
 
     fun rotateBy(deltaX: Float, deltaY: Float, deltaZ: Float) {
         engine.rotateBy(id, deltaX, deltaY, deltaZ)
-    }
-}
-
-@Stable
-class SceneUpdateScope internal constructor(
-    private val handles: SnapshotStateMap<String, EngineModelHandle>
-) {
-    val models: Collection<EngineModelHandle>
-        get() = handles.values
-
-    fun modelById(id: String): EngineModelHandle? = handles[id]
-
-    fun modelByAsset(assetPath: String): EngineModelHandle? {
-        return handles.values.firstOrNull { handle -> handle.assetPath == assetPath }
-    }
-
-    fun forEach(action: (EngineModelHandle) -> Unit) {
-        handles.values.forEach(action)
     }
 }
 

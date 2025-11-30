@@ -1,7 +1,6 @@
 package lt.smworks.multiplatform3dengine.vulkan
 
 import android.util.Log
-import android.view.MotionEvent
 import android.view.SurfaceHolder
 import android.view.SurfaceView
 import androidx.compose.foundation.background
@@ -12,6 +11,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
+import androidx.compose.runtime.snapshots.SnapshotStateMap
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.graphics.Color
@@ -45,8 +45,8 @@ actual fun VulkanScreen(
     val renderState = rememberSceneRenderer(scene, fpsSampler = config.fpsSamplePeriodMs)
     val engine = renderState.engine
     val context = LocalContext.current
-    val supported = remember { VulkanSupport.isSupported(context) }
-    DisposableEffect(engine, renderState) {
+    val supported = remember(context) { VulkanSupport.isSupported(context) }
+    DisposableEffect(engine) {
         engine.setOnFrameUpdate {
             renderState.notifyFrameRendered()
         }
@@ -55,7 +55,7 @@ actual fun VulkanScreen(
         }
     }
 
-    LaunchedEffect(renderState, onUpdate) {
+    LaunchedEffect(renderState.frameUpdates, onUpdate) {
         renderState.frameUpdates.collect {
             onUpdate()
         }
@@ -67,7 +67,6 @@ actual fun VulkanScreen(
                 modifier = Modifier.matchParentSize(),
                 factory = { viewContext ->
                     SurfaceView(viewContext).apply {
-                        var activePointerId = MotionEvent.INVALID_POINTER_ID
                         var lastSurfaceWidth = -1
                         var lastSurfaceHeight = -1
                         var lastLayoutWidth = -1
@@ -180,17 +179,31 @@ fun rememberSceneRenderer(
     fpsSampler: Long = 1000L
 ): SceneRenderState {
     val engine = rememberEngineApi()
-    val fpsState = remember { rememberFpsState() }
-    val handleMap = remember(engine) { mutableStateMapOf<String, EngineModelHandle>() }
-    val trackedModels = remember(engine) { mutableMapOf<String, TrackedModel>() }
-    val rotationJobs = remember(engine) { mutableMapOf<String, Job>() }
-    val modelUpdateJobs = remember(engine) { mutableMapOf<String, ModelUpdateJob>() }
-    val frameUpdates = remember(engine) {
-        MutableSharedFlow<Unit>(
-            extraBufferCapacity = 1,
-            onBufferOverflow = BufferOverflow.DROP_OLDEST
+    val memory = remember(engine) {
+        RendererMemory(
+            fpsState = mutableStateOf(0),
+            handleMap = mutableStateMapOf(),
+            trackedModels = mutableMapOf(),
+            rotationJobs = mutableMapOf(),
+            modelUpdateJobs = mutableMapOf(),
+            frameUpdates = MutableSharedFlow(
+                extraBufferCapacity = 1,
+                onBufferOverflow = BufferOverflow.DROP_OLDEST
+            )
         )
     }
+    val renderState = remember(engine) {
+        SceneRenderState(
+            engine = engine,
+            fpsState = memory.fpsState,
+            modelHandles = memory.handleMap,
+            frameUpdates = memory.frameUpdates
+        )
+    }
+    val trackedModels = memory.trackedModels
+    val rotationJobs = memory.rotationJobs
+    val modelUpdateJobs = memory.modelUpdateJobs
+    val handleMap = memory.handleMap
 
     LaunchedEffect(engine, scene.camera.position) {
         val position = scene.camera.position
@@ -255,36 +268,6 @@ fun rememberSceneRenderer(
                 handle.rotateTo(rotation.x, rotation.y, rotation.z)
             }
 
-            val autoRotate = model.autoRotate
-            if (autoRotate != null) {
-                val currentJob = rotationJobs[id]
-                if (currentJob == null || !currentJob.isActive || previousModel?.autoRotate != autoRotate) {
-                    currentJob?.cancel()
-                    val speeds = autoRotate.speed
-                    val hasRotation = speeds.x != 0f || speeds.y != 0f || speeds.z != 0f
-                    if (hasRotation) {
-                        val modelHandle = handle
-                        rotationJobs[id] = launch {
-                            var rotationX = model.rotation.x
-                            var rotationY = model.rotation.y
-                            var rotationZ = model.rotation.z
-                            val modelId = modelHandle.id
-
-                            while (isActive) {
-                                rotationX = advanceRotation(rotationX, speeds.x, fullRotation)
-                                rotationY = advanceRotation(rotationY, speeds.y, fullRotation)
-                                rotationZ = advanceRotation(rotationZ, speeds.z, fullRotation)
-
-                                engine.rotate(modelId, rotationX, rotationY, rotationZ)
-                                delay(autoRotate.intervalMs)
-                            }
-                        }
-                    }
-                }
-            } else {
-                rotationJobs.remove(id)?.cancel()
-            }
-
             val updateBlock = model.onUpdate
             if (updateBlock != null) {
                 val existingJob = modelUpdateJobs[id]
@@ -309,19 +292,12 @@ fun rememberSceneRenderer(
 
     LaunchedEffect(engine, fpsSampler) {
         while (isActive) {
-            fpsState.value = engine.getFps()
+            memory.fpsState.value = engine.getFps()
             delay(fpsSampler)
         }
     }
 
-    return remember(engine) {
-        SceneRenderState(
-            engine = engine,
-            fpsState = fpsState,
-            modelHandles = handleMap,
-            frameUpdates = frameUpdates
-        )
-    }
+    return renderState
 }
 
 private data class TrackedModel(
@@ -334,17 +310,11 @@ private data class ModelUpdateJob(
     val job: Job
 )
 
-private fun advanceRotation(current: Float, delta: Float, fullRotation: Float): Float {
-    if (delta == 0f) {
-        return current
-    }
-
-    var result = current + delta
-    if (result > fullRotation) {
-        result -= fullRotation
-    } else if (result < -fullRotation) {
-        result += fullRotation
-    }
-
-    return result
-}
+private class RendererMemory(
+    val fpsState: MutableState<Int>,
+    val handleMap: SnapshotStateMap<String, EngineModelHandle>,
+    val trackedModels: MutableMap<String, TrackedModel>,
+    val rotationJobs: MutableMap<String, Job>,
+    val modelUpdateJobs: MutableMap<String, ModelUpdateJob>,
+    val frameUpdates: MutableSharedFlow<Unit>
+)
