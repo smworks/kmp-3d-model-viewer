@@ -4,7 +4,10 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -31,21 +34,36 @@ fun EngineModelControls(
 
     Column(
         modifier = modifier
+            .fillMaxWidth()
             .background(Color(0x66000000), RoundedCornerShape(8.dp))
-            .padding(12.dp),
+            .padding(12.dp)
+            .verticalScroll(rememberScrollState()),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
-        TranslateControls(models = models)
-        ScaleControls(models = models)
-        RotateControls(models = models)
+        TranslateControls(
+            models = models,
+            modifier = Modifier.fillMaxWidth()
+        )
+        ScaleControls(
+            models = models,
+            modifier = Modifier.fillMaxWidth()
+        )
+        RotateControls(
+            models = models,
+            modifier = Modifier.fillMaxWidth()
+        )
     }
 }
 
 @Composable
 private fun TranslateControls(
-    models: List<EngineModelHandle>
+    models: List<EngineModelHandle>,
+    modifier: Modifier = Modifier
 ) {
-    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+    Column(
+        modifier = modifier,
+        verticalArrangement = Arrangement.spacedBy(6.dp)
+    ) {
         Text(
             text = "Translate",
             style = MaterialTheme.typography.titleSmall,
@@ -53,6 +71,7 @@ private fun TranslateControls(
         )
         ControlRow(
             label = "X",
+            modifier = Modifier.fillMaxWidth(),
             onDecrement = {
                 models.forEach { handle ->
                     handle.translateBy(-TRANSLATE_STEP, 0f, 0f)
@@ -66,6 +85,7 @@ private fun TranslateControls(
         )
         ControlRow(
             label = "Y",
+            modifier = Modifier.fillMaxWidth(),
             onDecrement = {
                 models.forEach { handle ->
                     handle.translateBy(0f, -TRANSLATE_STEP, 0f)
@@ -79,6 +99,7 @@ private fun TranslateControls(
         )
         ControlRow(
             label = "Z",
+            modifier = Modifier.fillMaxWidth(),
             onDecrement = {
                 models.forEach { handle ->
                     handle.translateBy(0f, 0f, -TRANSLATE_STEP)
@@ -95,9 +116,13 @@ private fun TranslateControls(
 
 @Composable
 private fun ScaleControls(
-    models: List<EngineModelHandle>
+    models: List<EngineModelHandle>,
+    modifier: Modifier = Modifier
 ) {
-    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+    Column(
+        modifier = modifier,
+        verticalArrangement = Arrangement.spacedBy(6.dp)
+    ) {
         Text(
             text = "Scale",
             style = MaterialTheme.typography.titleSmall,
@@ -105,6 +130,7 @@ private fun ScaleControls(
         )
         ControlRow(
             label = "Uniform",
+            modifier = Modifier.fillMaxWidth(),
             onDecrement = {
                 models.forEach { handle ->
                     handle.scaleBy(-SCALE_STEP)
@@ -121,9 +147,13 @@ private fun ScaleControls(
 
 @Composable
 private fun RotateControls(
-    models: List<EngineModelHandle>
+    models: List<EngineModelHandle>,
+    modifier: Modifier = Modifier
 ) {
-    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+    Column(
+        modifier = modifier,
+        verticalArrangement = Arrangement.spacedBy(6.dp)
+    ) {
         Text(
             text = "Rotate",
             style = MaterialTheme.typography.titleSmall,
@@ -131,6 +161,7 @@ private fun RotateControls(
         )
         ControlRow(
             label = "X",
+            modifier = Modifier.fillMaxWidth(),
             onDecrement = {
                 models.forEach { handle ->
                     handle.rotateBy(-ROTATE_STEP, 0f, 0f)
@@ -144,6 +175,7 @@ private fun RotateControls(
         )
         ControlRow(
             label = "Y",
+            modifier = Modifier.fillMaxWidth(),
             onDecrement = {
                 models.forEach { handle ->
                     handle.rotateBy(0f, -ROTATE_STEP, 0f)
@@ -157,6 +189,7 @@ private fun RotateControls(
         )
         ControlRow(
             label = "Z",
+            modifier = Modifier.fillMaxWidth(),
             onDecrement = {
                 models.forEach { handle ->
                     handle.rotateBy(0f, 0f, -ROTATE_STEP)
@@ -174,23 +207,30 @@ private fun RotateControls(
 @Composable
 private fun ControlRow(
     label: String,
+    modifier: Modifier = Modifier,
     onDecrement: () -> Unit,
     onIncrement: () -> Unit
 ) {
     Row(
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        modifier = modifier.fillMaxWidth(),
         verticalAlignment = Alignment.CenterVertically
     ) {
         Text(
             text = label,
             style = MaterialTheme.typography.bodyMedium,
-            color = Color.White
+            color = Color.White,
+            modifier = Modifier.weight(1f)
         )
-        Button(onClick = onDecrement) {
-            Text(text = "-")
-        }
-        Button(onClick = onIncrement) {
-            Text(text = "+")
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Button(onClick = onDecrement) {
+                Text(text = "-")
+            }
+            Button(onClick = onIncrement) {
+                Text(text = "+")
+            }
         }
     }
 }

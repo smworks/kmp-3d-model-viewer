@@ -6,8 +6,11 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.systemBarsPadding
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.systemBarsPadding
 import androidx.compose.material3.MaterialTheme
@@ -50,34 +53,41 @@ fun AndroidSample() {
         val modelHandles = sceneState.models.values.toList()
         val fps by sceneState.fps
 
-        Box(
-            modifier = Modifier.fillMaxSize()
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .systemBarsPadding()
         ) {
-            VulkanScreen(
-                modifier = Modifier.fillMaxSize(),
-                engine = sceneState.engine
-            )
-
-            Text(
-                text = "$fps FPS",
+            Box(
                 modifier = Modifier
-                    .align(Alignment.TopEnd)
-                    .padding(16.dp)
-                    .background(
-                        color = Color(0x66000000),
-                        shape = RoundedCornerShape(8.dp)
-                    )
-                    .padding(horizontal = 12.dp, vertical = 6.dp),
-                color = Color.White,
-                style = MaterialTheme.typography.bodyMedium
-            )
+                    .weight(1f)
+                    .fillMaxSize()
+            ) {
+                VulkanScreen(
+                    modifier = Modifier.fillMaxSize(),
+                    engine = sceneState.engine
+                )
+
+                Text(
+                    text = "$fps FPS",
+                    modifier = Modifier
+                        .align(Alignment.TopEnd)
+                        .padding(16.dp)
+                        .background(
+                            color = Color(0x66000000),
+                            shape = RoundedCornerShape(8.dp)
+                        )
+                        .padding(horizontal = 12.dp, vertical = 6.dp),
+                    color = Color.White,
+                    style = MaterialTheme.typography.bodyMedium
+                )
+            }
 
             EngineModelControls(
                 models = modelHandles,
                 modifier = Modifier
-                    .align(Alignment.BottomStart)
-                    .padding(16.dp)
-                    .systemBarsPadding()
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 12.dp)
             )
         }
     }
