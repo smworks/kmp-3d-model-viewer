@@ -6,13 +6,14 @@ import androidx.compose.ui.Modifier
 
 @Stable
 data class Config(
-    val showFps: Boolean = false
+    val showFps: Boolean = false,
+    val fpsSamplePeriodMs: Long = 250L
 )
 
 @Composable
 expect fun VulkanScreen(
 	modifier: Modifier = Modifier,
-	renderState: SceneRenderState,
+	scene: Scene,
 	onUpdate: () -> Unit = {},
 	config: Config = Config()
 )

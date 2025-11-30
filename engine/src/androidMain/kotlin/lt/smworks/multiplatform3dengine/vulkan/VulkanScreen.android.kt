@@ -38,10 +38,11 @@ internal fun setCurrentRendererForGestures(renderer: EngineAPI) {
 @Composable
 actual fun VulkanScreen(
     modifier: Modifier,
-    renderState: SceneRenderState,
+    scene: Scene,
     onUpdate: () -> Unit,
     config: Config
 ) {
+    val renderState = rememberSceneRenderer(scene, fpsSampler = config.fpsSamplePeriodMs)
     val engine = renderState.engine
     val context = LocalContext.current
     val supported = remember { VulkanSupport.isSupported(context) }
@@ -175,7 +176,8 @@ fun rememberEngineApi(): EngineAPI {
 
 @Composable
 fun rememberSceneRenderer(
-    scene: Scene
+    scene: Scene,
+    fpsSampler: Long = 1000L
 ): SceneRenderState {
     val engine = rememberEngineApi()
     val fpsState = remember { rememberFpsState() }
@@ -306,17 +308,10 @@ fun rememberSceneRenderer(
         }
     }
 
-    LaunchedEffect(engine, scene.fpsSamplePeriodMs) {
+    LaunchedEffect(engine, fpsSampler) {
         while (isActive) {
             fpsState.value = engine.getFps()
-            delay(scene.fpsSamplePeriodMs)
-        }
-    }
-
-    LaunchedEffect(engine, scene.onUpdate) {
-        val updater = scene.onUpdate ?: return@LaunchedEffect
-        frameUpdates.collect {
-            updater.invoke(updateScope)
+            delay(fpsSampler)
         }
     }
 

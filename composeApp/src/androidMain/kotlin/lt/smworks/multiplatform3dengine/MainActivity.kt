@@ -13,9 +13,8 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import lt.smworks.multiplatform3dengine.vulkan.Config
-import lt.smworks.multiplatform3dengine.vulkan.SceneRenderState
+import lt.smworks.multiplatform3dengine.vulkan.Scene
 import lt.smworks.multiplatform3dengine.vulkan.VulkanScreen
-import lt.smworks.multiplatform3dengine.vulkan.rememberSceneRenderer
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -34,7 +33,6 @@ fun AndroidSample(
 ) {
     MaterialTheme {
         val scene = viewModel.scene
-        val renderState = rememberSceneRenderer(scene)
 
         Column(
             modifier = Modifier
@@ -43,7 +41,7 @@ fun AndroidSample(
                 .systemBarsPadding()
         ) {
             ModelPreview(
-                renderState = renderState,
+                scene = scene,
                 onUpdate = viewModel::onUpdate
             )
             ModelControls(
@@ -61,7 +59,7 @@ fun AndroidSample(
 
 @Composable
 private fun ColumnScope.ModelPreview(
-    renderState: SceneRenderState,
+    scene: Scene,
     onUpdate: () -> Unit
 ) {
     Box(
@@ -71,7 +69,7 @@ private fun ColumnScope.ModelPreview(
     ) {
         VulkanScreen(
             modifier = Modifier.fillMaxSize(),
-            renderState = renderState,
+            scene = scene,
             onUpdate = onUpdate,
             config = Config(showFps = true)
         )

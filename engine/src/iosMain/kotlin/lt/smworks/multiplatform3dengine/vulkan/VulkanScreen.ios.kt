@@ -8,7 +8,7 @@ import androidx.compose.ui.Modifier
 @Suppress("UNUSED_PARAMETER")
 actual fun VulkanScreen(
 	modifier: Modifier,
-	renderState: SceneRenderState,
+	scene: Scene,
 	onUpdate: () -> Unit,
 	config: Config
 ) {

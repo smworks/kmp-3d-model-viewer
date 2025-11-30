@@ -10,9 +10,7 @@ import kotlinx.coroutines.flow.MutableSharedFlow
 @Stable
 data class Scene(
     val camera: SceneCamera = SceneCamera(),
-    val models: Map<String, SceneModel> = emptyMap(),
-    val fpsSamplePeriodMs: Long = 250L,
-    val onUpdate: (SceneUpdateScope.() -> Unit)? = null
+    val models: Map<String, SceneModel> = emptyMap()
 ) {
     fun getModel(id: String): SceneModel? = models[id]
 
