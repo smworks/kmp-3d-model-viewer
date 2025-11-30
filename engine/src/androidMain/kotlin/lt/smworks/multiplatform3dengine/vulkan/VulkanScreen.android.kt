@@ -23,6 +23,7 @@ import kotlin.math.PI
 actual typealias VulkanRenderTarget = Surface
 
 private const val LOG_TAG = "VulkanScreen"
+private const val MODEL_UPDATE_INTERVAL_MS = 16L
 
 private var currentRenderer: EngineAPI? = null
 
@@ -217,6 +218,7 @@ fun rememberEngineScene(
     val fpsState = remember { rememberFpsState() }
     val loadedModels = remember(engine) { mutableStateMapOf<EngineModelHandleRef, EngineModelHandle>() }
     val rotationJobs = remember(engine) { mutableMapOf<EngineModelHandleRef, Job>() }
+    val modelUpdateJobs = remember(engine) { mutableMapOf<EngineModelHandleRef, ModelUpdateJob>() }
     val updateScope = remember(engine) { EngineSceneUpdateScope(loadedModels) }
 
     LaunchedEffect(engine, sceneSpec.cameraPosition) {
@@ -229,13 +231,18 @@ fun rememberEngineScene(
         engine.setCameraRotation(rotation.x, rotation.y, rotation.z)
     }
 
-    LaunchedEffect(engine, sceneSpec.models) {
+    LaunchedEffect(engine, sceneSpec.models, sceneSpec.modelUpdates) {
         val fullRotation = (PI * 2f).toFloat()
         val activeRefs = sceneSpec.models.toSet()
 
         val staleRefs = rotationJobs.keys - activeRefs
         staleRefs.forEach { ref ->
             rotationJobs.remove(ref)?.cancel()
+        }
+
+        val staleUpdateRefs = modelUpdateJobs.keys - activeRefs
+        staleUpdateRefs.forEach { ref ->
+            modelUpdateJobs.remove(ref)?.job?.cancel()
         }
 
         loadedModels.keys.toList()
@@ -296,6 +303,24 @@ fun rememberEngineScene(
             } else {
                 rotationJobs.remove(ref)?.cancel()
             }
+
+            val updateBlock = sceneSpec.modelUpdates[ref]
+            if (updateBlock != null) {
+                val existingJob = modelUpdateJobs[ref]
+                if (existingJob?.block !== updateBlock || existingJob.job.isActive.not()) {
+                    existingJob?.job?.cancel()
+                    val modelHandle = handle
+                    val job = launch {
+                        while (isActive) {
+                            updateBlock.invoke(modelHandle)
+                            delay(MODEL_UPDATE_INTERVAL_MS)
+                        }
+                    }
+                    modelUpdateJobs[ref] = ModelUpdateJob(updateBlock, job)
+                }
+            } else {
+                modelUpdateJobs.remove(ref)?.job?.cancel()
+            }
         }
     }
 
@@ -310,7 +335,7 @@ fun rememberEngineScene(
         val updater = sceneSpec.onUpdate ?: return@LaunchedEffect
         while (isActive) {
             updater.invoke(updateScope)
-            delay(16L)
+            delay(MODEL_UPDATE_INTERVAL_MS)
         }
     }
 
@@ -322,6 +347,11 @@ fun rememberEngineScene(
         )
     }
 }
+
+private data class ModelUpdateJob(
+    val block: EngineModelHandle.() -> Unit,
+    val job: Job
+)
 
 private fun advanceRotation(current: Float, delta: Float, fullRotation: Float): Float {
     if (delta == 0f) {

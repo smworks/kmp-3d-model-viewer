@@ -12,6 +12,7 @@ data class EngineSceneSpec(
     val cameraRotation: EngineCameraRotation = EngineCameraRotation(),
     val models: List<EngineModelHandleRef> = emptyList(),
     val fpsSamplePeriodMs: Long = 250L,
+    val modelUpdates: Map<EngineModelHandleRef, EngineModelHandle.() -> Unit> = emptyMap(),
     val onUpdate: (EngineSceneUpdateScope.() -> Unit)? = null
 )
 
@@ -100,6 +101,7 @@ class EngineSceneBuilder {
     var fpsSamplePeriodMs: Long = 250L
     private val modelRefs = mutableListOf<EngineModelHandleRef>()
     private var onUpdate: (EngineSceneUpdateScope.() -> Unit)? = null
+    private val modelUpdates = mutableMapOf<EngineModelHandleRef, EngineModelHandle.() -> Unit>()
 
     fun cameraPosition(x: Float = 0f, y: Float = 0f, z: Float = 4f) {
         cameraPosition = EngineCameraPosition(x, y, z)
@@ -112,11 +114,19 @@ class EngineSceneBuilder {
     fun model(assetPath: String, block: EngineModelBuilder.() -> Unit = {}): EngineModelHandleRef {
         val builder = EngineModelBuilder(assetPath).apply(block)
         val spec = builder.build()
-        return EngineModelHandleRef(spec).also(modelRefs::add)
+        val handleRef = EngineModelHandleRef(spec).also(modelRefs::add)
+        builder.consumeOnUpdate()?.let { updateBlock ->
+            modelUpdates[handleRef] = updateBlock
+        }
+        return handleRef
     }
 
     fun onUpdate(block: EngineSceneUpdateScope.() -> Unit) {
         onUpdate = block
+    }
+
+    fun EngineModelHandleRef.onUpdate(block: EngineModelHandle.() -> Unit) {
+        modelUpdates[this] = block
     }
 
     fun build(): EngineSceneSpec {
@@ -125,6 +135,7 @@ class EngineSceneBuilder {
             cameraRotation = cameraRotation,
             models = modelRefs.toList(),
             fpsSamplePeriodMs = fpsSamplePeriodMs,
+            modelUpdates = modelUpdates.toMap(),
             onUpdate = onUpdate
         )
     }
@@ -136,6 +147,7 @@ class EngineModelBuilder internal constructor(
     private var translation = EngineModelTranslation()
     private var scale = 1f
     private var autoRotate: EngineModelAutoRotate? = null
+    private var updateBlock: (EngineModelHandle.() -> Unit)? = null
 
     fun position(x: Float = 0f, y: Float = 0f, z: Float = 0f) {
         translation = EngineModelTranslation(x, y, z)
@@ -154,6 +166,10 @@ class EngineModelBuilder internal constructor(
         autoRotate = EngineModelAutoRotate(speedX, speedY, speedZ, intervalMs)
     }
 
+    fun onUpdate(block: EngineModelHandle.() -> Unit) {
+        updateBlock = block
+    }
+
     internal fun build(): EngineModelSpec {
         return EngineModelSpec(
             assetPath = assetPath,
@@ -162,6 +178,8 @@ class EngineModelBuilder internal constructor(
             autoRotate = autoRotate
         )
     }
+
+    internal fun consumeOnUpdate(): (EngineModelHandle.() -> Unit)? = updateBlock
 }
 
 fun engineScene(block: EngineSceneBuilder.() -> Unit): EngineSceneSpec {

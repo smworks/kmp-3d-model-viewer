@@ -42,8 +42,8 @@ fun AndroidSample() {
                 val scene = model("models/scene.gltf") {
                     scale(0.001f)
                 }
-                onUpdate {
-                    scene.handle?.rotateBy(0.001f, 0.006f, 0.00f)
+                scene.onUpdate {
+                    rotateBy(0.001f, 0.006f, 0.0f)
                 }
             }
             val fps by sceneState.fps
