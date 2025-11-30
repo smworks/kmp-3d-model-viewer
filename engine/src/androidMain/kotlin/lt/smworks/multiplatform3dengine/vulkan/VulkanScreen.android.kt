@@ -11,18 +11,16 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
-import androidx.compose.runtime.snapshots.SnapshotStateMap
-import androidx.compose.ui.Modifier
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
-import kotlinx.coroutines.Job
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.isActive
 import kotlinx.coroutines.channels.BufferOverflow
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.isActive
 
 private const val LOG_TAG = "VulkanScreen"
 
@@ -179,7 +177,6 @@ fun rememberSceneRenderer(
     val memory = remember(engine) {
         RendererMemory(
             fpsState = mutableStateOf(0),
-            handleMap = mutableStateMapOf(),
             trackedModels = mutableMapOf(),
             frameUpdates = MutableSharedFlow(
                 extraBufferCapacity = 1,
@@ -191,12 +188,10 @@ fun rememberSceneRenderer(
         SceneRenderState(
             engine = engine,
             fpsState = memory.fpsState,
-            modelHandles = memory.handleMap,
             frameUpdates = memory.frameUpdates
         )
     }
     val trackedModels = memory.trackedModels
-    val handleMap = memory.handleMap
 
     LaunchedEffect(engine, scene.camera.position) {
         val position = scene.camera.position
@@ -214,7 +209,6 @@ fun rememberSceneRenderer(
         val staleIds = trackedModels.keys - desiredModels.keys
         staleIds.forEach { id ->
             trackedModels.remove(id)
-            handleMap.remove(id)
         }
 
         desiredModels.forEach { (id, model) ->
@@ -233,13 +227,9 @@ fun rememberSceneRenderer(
                     id = loadedId,
                     assetPath = model.assetPath,
                     engine = engine
-                ).also { newHandle ->
-                    handleMap[id] = newHandle
-                }
+                )
             } else {
-                tracked.handle.also { existing ->
-                    handleMap[id] = existing
-                }
+                tracked.handle
             }
 
             val previousModel = tracked?.model
@@ -277,14 +267,8 @@ private data class TrackedModel(
     val model: SceneModel
 )
 
-private data class ModelUpdateJob(
-    val block: EngineModelHandle.() -> Unit,
-    val job: Job
-)
-
 private class RendererMemory(
     val fpsState: MutableState<Int>,
-    val handleMap: SnapshotStateMap<String, EngineModelHandle>,
     val trackedModels: MutableMap<String, TrackedModel>,
     val frameUpdates: MutableSharedFlow<Unit>
 )

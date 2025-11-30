@@ -110,19 +110,9 @@ data class SceneModel(
 class SceneRenderState internal constructor(
     val engine: EngineAPI,
     fpsState: MutableState<Int>,
-    internal val modelHandles: SnapshotStateMap<String, EngineModelHandle>,
     internal val frameUpdates: MutableSharedFlow<Unit>
 ) {
     val fps: State<Int> = fpsState
-
-    val models: Map<String, EngineModelHandle>
-        get() = modelHandles
-
-    fun modelById(id: String): EngineModelHandle? = modelHandles[id]
-
-    fun modelByAsset(assetPath: String): EngineModelHandle? {
-        return modelHandles.values.firstOrNull { handle -> handle.assetPath == assetPath }
-    }
 
     internal fun notifyFrameRendered() {
         frameUpdates.tryEmit(Unit)
