@@ -5,6 +5,7 @@ import android.view.Surface
 import android.view.SurfaceHolder
 import android.view.SurfaceView
 import android.view.MotionEvent
+import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -20,8 +21,6 @@ import kotlinx.coroutines.launch
 import kotlin.math.abs
 import kotlin.math.PI
 
-actual typealias VulkanRenderTarget = Surface
-
 private const val LOG_TAG = "VulkanScreen"
 private const val MODEL_UPDATE_INTERVAL_MS = 16L
 
@@ -34,8 +33,7 @@ internal fun setCurrentRendererForGestures(renderer: EngineAPI) {
 @Composable
 actual fun VulkanScreen(
     modifier: Modifier,
-    engine: EngineAPI,
-    onError: (error: String) -> Unit
+    engine: EngineAPI
 ) {
     val context = LocalContext.current
     val supported = remember { VulkanSupport.isSupported(context) }
@@ -182,9 +180,10 @@ actual fun VulkanScreen(
             }
         )
     } else {
-        LaunchedEffect(Unit) {
-            onError("Vulkan is not supported")
-        }
+        Text(
+            text = "Vulkan is not supported",
+            modifier = modifier
+        )
     }
 }
 

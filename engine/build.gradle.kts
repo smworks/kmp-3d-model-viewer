@@ -17,6 +17,7 @@ kotlin {
 		commonMain.dependencies {
 			implementation(compose.runtime)
 			implementation(compose.ui)
+			implementation(compose.material3)
 		}
 		androidMain.dependencies {
 			// AndroidView comes from compose.ui

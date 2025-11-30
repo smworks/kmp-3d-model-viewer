@@ -53,10 +53,7 @@ fun AndroidSample() {
             ) {
                 VulkanScreen(
                     modifier = Modifier.fillMaxSize(),
-                    engine = sceneState.engine,
-                    onError = { error ->
-
-                    }
+                    engine = sceneState.engine
                 )
 
                 Text(
