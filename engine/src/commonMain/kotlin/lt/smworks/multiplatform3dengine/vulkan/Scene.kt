@@ -103,8 +103,7 @@ data class SceneModel(
     val assetPath: String,
     val translation: SceneVector3 = SceneVector3(),
     val rotation: SceneVector3 = SceneVector3(),
-    val scale: Float = 1f,
-    val onUpdate: (EngineModelHandle.() -> Unit)? = null
+    val scale: Float = 1f
 )
 
 @Stable

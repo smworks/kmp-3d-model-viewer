@@ -23,11 +23,8 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.flow.MutableSharedFlow
-import kotlinx.coroutines.launch
-import kotlin.math.PI
 
 private const val LOG_TAG = "VulkanScreen"
-private const val MODEL_UPDATE_INTERVAL_MS = 16L
 
 private var currentRenderer: EngineAPI? = null
 
@@ -184,8 +181,6 @@ fun rememberSceneRenderer(
             fpsState = mutableStateOf(0),
             handleMap = mutableStateMapOf(),
             trackedModels = mutableMapOf(),
-            rotationJobs = mutableMapOf(),
-            modelUpdateJobs = mutableMapOf(),
             frameUpdates = MutableSharedFlow(
                 extraBufferCapacity = 1,
                 onBufferOverflow = BufferOverflow.DROP_OLDEST
@@ -201,8 +196,6 @@ fun rememberSceneRenderer(
         )
     }
     val trackedModels = memory.trackedModels
-    val rotationJobs = memory.rotationJobs
-    val modelUpdateJobs = memory.modelUpdateJobs
     val handleMap = memory.handleMap
 
     LaunchedEffect(engine, scene.camera.position) {
@@ -216,13 +209,10 @@ fun rememberSceneRenderer(
     }
 
     LaunchedEffect(engine, scene.models) {
-        val fullRotation = (PI * 2f).toFloat()
         val desiredModels = scene.models
 
         val staleIds = trackedModels.keys - desiredModels.keys
         staleIds.forEach { id ->
-            rotationJobs.remove(id)?.cancel()
-            modelUpdateJobs.remove(id)?.job?.cancel()
             trackedModels.remove(id)
             handleMap.remove(id)
         }
@@ -268,24 +258,6 @@ fun rememberSceneRenderer(
                 handle.rotateTo(rotation.x, rotation.y, rotation.z)
             }
 
-            val updateBlock = model.onUpdate
-            if (updateBlock != null) {
-                val existingJob = modelUpdateJobs[id]
-                if (existingJob?.block !== updateBlock || existingJob.job.isActive.not()) {
-                    existingJob?.job?.cancel()
-                    val modelHandle = handle
-                    val job = launch {
-                        while (isActive) {
-                            updateBlock.invoke(modelHandle)
-                            delay(MODEL_UPDATE_INTERVAL_MS)
-                        }
-                    }
-                    modelUpdateJobs[id] = ModelUpdateJob(updateBlock, job)
-                }
-            } else {
-                modelUpdateJobs.remove(id)?.job?.cancel()
-            }
-
             trackedModels[id] = TrackedModel(handle, model)
         }
     }
@@ -314,7 +286,5 @@ private class RendererMemory(
     val fpsState: MutableState<Int>,
     val handleMap: SnapshotStateMap<String, EngineModelHandle>,
     val trackedModels: MutableMap<String, TrackedModel>,
-    val rotationJobs: MutableMap<String, Job>,
-    val modelUpdateJobs: MutableMap<String, ModelUpdateJob>,
     val frameUpdates: MutableSharedFlow<Unit>
 )

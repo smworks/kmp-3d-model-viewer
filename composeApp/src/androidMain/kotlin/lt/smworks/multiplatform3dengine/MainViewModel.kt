@@ -30,7 +30,7 @@ class MainViewModel : ViewModel() {
     )
 
     fun onUpdate() {
-        val model = scene.getModel(MODEL_ID) ?: return
+        scene = scene.rotateModelBy(MODEL_ID, 0.001f, 0.001f, 0.001f)
     }
 
     fun translateModel(deltaX: Float, deltaY: Float, deltaZ: Float) {
