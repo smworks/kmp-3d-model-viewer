@@ -9,7 +9,8 @@ import androidx.compose.ui.Modifier
 actual fun VulkanScreen(
 	modifier: Modifier,
 	renderState: SceneRenderState,
-	onUpdate: () -> Unit = {}
+	onUpdate: () -> Unit,
+	config: Config
 ) {
 	Text("Vulkan screen is not available on iOS", modifier = modifier)
 }

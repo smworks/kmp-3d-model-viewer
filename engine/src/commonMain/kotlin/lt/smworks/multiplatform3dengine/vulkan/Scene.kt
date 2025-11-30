@@ -10,16 +10,16 @@ import kotlinx.coroutines.flow.MutableSharedFlow
 @Stable
 data class Scene(
     val camera: SceneCamera = SceneCamera(),
-    val models: List<SceneModel> = emptyList(),
+    val models: Map<String, SceneModel> = emptyMap(),
     val fpsSamplePeriodMs: Long = 250L,
     val onUpdate: (SceneUpdateScope.() -> Unit)? = null
 ) {
-//    fun updateModel(id: String, onUpdate: (SceneModel) -> SceneModel) {
-//        val model = models.find { it.id == id } ?: return
-//        val newModel = onUpdate(model)
-//        models.remove(model)
-//        models.add(newModel)
-//    }
+    fun getModel(id: String): SceneModel? = models[id]
+
+    fun updateModel(model: SceneModel): Scene {
+        val targetId = model.id
+        return copy(models = models + (targetId to model))
+    }
 }
 
 @Stable

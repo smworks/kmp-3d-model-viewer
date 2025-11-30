@@ -1,56 +1,19 @@
 package lt.smworks.multiplatform3dengine
 
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.lifecycle.ViewModel
-import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.update
 import lt.smworks.multiplatform3dengine.vulkan.Scene
 import lt.smworks.multiplatform3dengine.vulkan.SceneCamera
 import lt.smworks.multiplatform3dengine.vulkan.SceneModel
 import lt.smworks.multiplatform3dengine.vulkan.SceneVector3
 
+private const val MODEL_ID = "main_scene"
+
 class MainViewModel : ViewModel() {
-    private val _scene = MutableStateFlow(initialScene())
-    val scene: StateFlow<Scene> = _scene.asStateFlow()
-
-    fun translateModels(deltaX: Float, deltaY: Float, deltaZ: Float) {
-        _scene.update { current ->
-            current.copy(
-                models = current.models.map { model ->
-                    model.copy(
-                        translation = model.translation.offset(deltaX, deltaY, deltaZ)
-                    )
-                }
-            )
-        }
-    }
-
-    fun scaleModels(delta: Float) {
-        _scene.update { current ->
-            current.copy(
-                models = current.models.map { model ->
-                    val newScale = (model.scale + delta).coerceAtLeast(0.0001f)
-                    model.copy(scale = newScale)
-                }
-            )
-        }
-    }
-
-    fun rotateModels(deltaX: Float, deltaY: Float, deltaZ: Float) {
-        _scene.update { current ->
-            current.copy(
-                models = current.models.map { model ->
-                    model.copy(
-                        rotation = model.rotation.offset(deltaX, deltaY, deltaZ)
-                    )
-                }
-            )
-        }
-    }
-
-    fun onUpdate() {
-    }
+    var scene by mutableStateOf(initialScene())
+        private set
 
     private fun initialScene(): Scene = Scene(
         camera = SceneCamera(
@@ -59,12 +22,49 @@ class MainViewModel : ViewModel() {
         ),
         models = listOf(
             SceneModel(
-                id = "main_scene",
+                id = MODEL_ID,
                 assetPath = "models/scene.gltf",
                 scale = 0.001f
             )
-        )
+        ).associateBy(SceneModel::id)
     )
+
+    fun onUpdate() {
+        val model = scene.getModel(MODEL_ID) ?: return
+        scene.updateModel(model)
+    }
+
+    fun translateModels(deltaX: Float, deltaY: Float, deltaZ: Float) {
+        val currentScene = scene
+        scene = currentScene.copy(
+            models = currentScene.models.mapValues { (_, model) ->
+                model.copy(
+                    translation = model.translation.offset(deltaX, deltaY, deltaZ)
+                )
+            }
+        )
+    }
+
+    fun scaleModels(delta: Float) {
+        val currentScene = scene
+        scene = currentScene.copy(
+            models = currentScene.models.mapValues { (_, model) ->
+                val newScale = (model.scale + delta).coerceAtLeast(0.0001f)
+                model.copy(scale = newScale)
+            }
+        )
+    }
+
+    fun rotateModels(deltaX: Float, deltaY: Float, deltaZ: Float) {
+        val currentScene = scene
+        scene = currentScene.copy(
+            models = currentScene.models.mapValues { (_, model) ->
+                model.copy(
+                    rotation = model.rotation.offset(deltaX, deltaY, deltaZ)
+                )
+            }
+        )
+    }
 }
 
 private fun SceneVector3.offset(deltaX: Float, deltaY: Float, deltaZ: Float): SceneVector3 {

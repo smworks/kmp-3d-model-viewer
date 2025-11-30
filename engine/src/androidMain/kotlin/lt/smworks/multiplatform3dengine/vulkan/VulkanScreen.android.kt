@@ -4,17 +4,25 @@ import android.util.Log
 import android.view.MotionEvent
 import android.view.SurfaceHolder
 import android.view.SurfaceView
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxScope
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.flow.MutableSharedFlow
-import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.launch
 import kotlin.math.PI
 
@@ -31,7 +39,8 @@ internal fun setCurrentRendererForGestures(renderer: EngineAPI) {
 actual fun VulkanScreen(
     modifier: Modifier,
     renderState: SceneRenderState,
-    onUpdate: () -> Unit
+    onUpdate: () -> Unit,
+    config: Config
 ) {
     val engine = renderState.engine
     val context = LocalContext.current
@@ -52,78 +61,102 @@ actual fun VulkanScreen(
     }
 
     if (supported) {
-        AndroidView(
-            modifier = modifier,
-            factory = { viewContext ->
-                SurfaceView(viewContext).apply {
-                    var activePointerId = MotionEvent.INVALID_POINTER_ID
-                    var lastSurfaceWidth = -1
-                    var lastSurfaceHeight = -1
-                    var lastLayoutWidth = -1
-                    var lastLayoutHeight = -1
-                    var lastOrientation: String? = null
+        Box(modifier = modifier) {
+            AndroidView(
+                modifier = Modifier.matchParentSize(),
+                factory = { viewContext ->
+                    SurfaceView(viewContext).apply {
+                        var activePointerId = MotionEvent.INVALID_POINTER_ID
+                        var lastSurfaceWidth = -1
+                        var lastSurfaceHeight = -1
+                        var lastLayoutWidth = -1
+                        var lastLayoutHeight = -1
+                        var lastOrientation: String? = null
 
-                    addOnLayoutChangeListener { _, left, top, right, bottom, _, _, _, _ ->
-                        val layoutWidth = right - left
-                        val layoutHeight = bottom - top
-                        if (layoutWidth <= 0 || layoutHeight <= 0) {
-                            return@addOnLayoutChangeListener
+                        addOnLayoutChangeListener { _, left, top, right, bottom, _, _, _, _ ->
+                            val layoutWidth = right - left
+                            val layoutHeight = bottom - top
+                            if (layoutWidth <= 0 || layoutHeight <= 0) {
+                                return@addOnLayoutChangeListener
+                            }
+                            if (layoutWidth != lastLayoutWidth || layoutHeight != lastLayoutHeight) {
+                                lastLayoutWidth = layoutWidth
+                                lastLayoutHeight = layoutHeight
+                                Log.i(LOG_TAG, "Layout changed to ${layoutWidth}x$layoutHeight")
+                                engine.resize(layoutWidth, layoutHeight)
+                            }
                         }
-                        if (layoutWidth != lastLayoutWidth || layoutHeight != lastLayoutHeight) {
-                            lastLayoutWidth = layoutWidth
-                            lastLayoutHeight = layoutHeight
-                            Log.i(LOG_TAG, "Layout changed to ${layoutWidth}x$layoutHeight")
-                            engine.resize(layoutWidth, layoutHeight)
-                        }
+
+                        holder.addCallback(object : SurfaceHolder.Callback {
+                            override fun surfaceCreated(holder: SurfaceHolder) {
+                                val surface = holder.surface
+                                if (surface != null && surface.isValid) {
+                                    engine.init(surface, viewContext.assets)
+                                    engine.start()
+                                }
+                            }
+
+                            override fun surfaceChanged(holder: SurfaceHolder, format: Int, width: Int, height: Int) {
+                                val orientation = when {
+                                    width > height -> "landscape"
+                                    height > width -> "portrait"
+                                    else -> "square"
+                                }
+
+                                if (orientation != lastOrientation) {
+                                    Log.i(LOG_TAG, "Orientation changed to $orientation (width=$width, height=$height)")
+                                    lastOrientation = orientation
+                                }
+
+                                if (width != lastSurfaceWidth || height != lastSurfaceHeight) {
+                                    engine.resize(width, height)
+                                    lastSurfaceWidth = width
+                                    lastSurfaceHeight = height
+                                    Log.i(LOG_TAG, "Surface resized to ${width}x$height")
+                                }
+                            }
+
+                            override fun surfaceDestroyed(holder: SurfaceHolder) {
+                                lastSurfaceWidth = -1
+                                lastSurfaceHeight = -1
+                                lastLayoutWidth = -1
+                                lastLayoutHeight = -1
+                                lastOrientation = null
+                                engine.destroy()
+                            }
+                        })
                     }
-
-                    holder.addCallback(object : SurfaceHolder.Callback {
-                        override fun surfaceCreated(holder: SurfaceHolder) {
-                            val surface = holder.surface
-                            if (surface != null && surface.isValid) {
-                                engine.init(surface, viewContext.assets)
-                                engine.start()
-                            }
-                        }
-
-                        override fun surfaceChanged(holder: SurfaceHolder, format: Int, width: Int, height: Int) {
-                            val orientation = when {
-                                width > height -> "landscape"
-                                height > width -> "portrait"
-                                else -> "square"
-                            }
-
-                            if (orientation != lastOrientation) {
-                                Log.i(LOG_TAG, "Orientation changed to $orientation (width=$width, height=$height)")
-                                lastOrientation = orientation
-                            }
-
-                            if (width != lastSurfaceWidth || height != lastSurfaceHeight) {
-                                engine.resize(width, height)
-                                lastSurfaceWidth = width
-                                lastSurfaceHeight = height
-                                Log.i(LOG_TAG, "Surface resized to ${width}x$height")
-                            }
-                        }
-
-                        override fun surfaceDestroyed(holder: SurfaceHolder) {
-                            lastSurfaceWidth = -1
-                            lastSurfaceHeight = -1
-                            lastLayoutWidth = -1
-                            lastLayoutHeight = -1
-                            lastOrientation = null
-                            engine.destroy()
-                        }
-                    })
                 }
+            )
+
+            if (config.showFps) {
+                val fps by renderState.fps
+                FpsCounter(fps)
             }
-        )
+        }
     } else {
         Text(
             text = "Vulkan is not supported",
             modifier = modifier
         )
     }
+}
+
+@Composable
+private fun BoxScope.FpsCounter(fps: Int) {
+    Text(
+        text = "$fps FPS",
+        modifier = Modifier
+            .align(Alignment.TopEnd)
+            .padding(16.dp)
+            .background(
+                color = Color(0x66000000),
+                shape = RoundedCornerShape(8.dp)
+            )
+            .padding(horizontal = 12.dp, vertical = 6.dp),
+        color = Color.White,
+        style = MaterialTheme.typography.bodyMedium
+    )
 }
 
 @Composable
@@ -170,7 +203,7 @@ fun rememberSceneRenderer(
 
     LaunchedEffect(engine, scene.models) {
         val fullRotation = (PI * 2f).toFloat()
-        val desiredModels = scene.models.associateBy(SceneModel::id)
+        val desiredModels = scene.models
 
         val staleIds = trackedModels.keys - desiredModels.keys
         staleIds.forEach { id ->
