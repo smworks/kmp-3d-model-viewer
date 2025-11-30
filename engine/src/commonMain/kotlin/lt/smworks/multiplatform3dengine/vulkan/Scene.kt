@@ -14,9 +14,66 @@ data class Scene(
 ) {
     fun getModel(id: String): SceneModel? = models[id]
 
+    fun updateModel(id: String, updater: (SceneModel) -> SceneModel): Scene {
+        val existingModel = models[id] ?: return this
+        val updatedModel = updater(existingModel)
+        if (updatedModel == existingModel) {
+            return this
+        }
+        return copy(models = models + (id to updatedModel))
+    }
+
+    fun translateModelBy(id: String, deltaX: Float, deltaY: Float, deltaZ: Float): Scene {
+        return updateModel(id) { model ->
+            model.copy(translation = model.translation.offsetBy(deltaX, deltaY, deltaZ))
+        }
+    }
+
+    fun setModelTranslation(id: String, translation: SceneVector3): Scene {
+        return updateModel(id) { model ->
+            model.copy(translation = translation)
+        }
+    }
+
+    fun setModelTranslation(id: String, x: Float, y: Float, z: Float): Scene {
+        return setModelTranslation(id, SceneVector3(x = x, y = y, z = z))
+    }
+
+    fun rotateModelBy(id: String, deltaX: Float, deltaY: Float, deltaZ: Float): Scene {
+        return updateModel(id) { model ->
+            model.copy(rotation = model.rotation.offsetBy(deltaX, deltaY, deltaZ))
+        }
+    }
+
+    fun setModelRotation(id: String, rotation: SceneVector3): Scene {
+        return updateModel(id) { model ->
+            model.copy(rotation = rotation)
+        }
+    }
+
+    fun setModelRotation(id: String, x: Float, y: Float, z: Float): Scene {
+        return setModelRotation(id, SceneVector3(x = x, y = y, z = z))
+    }
+
+    fun scaleModelBy(id: String, delta: Float): Scene {
+        return updateModel(id) { model ->
+            model.copy(scale = (model.scale + delta).coerceAtLeast(MIN_SCALE))
+        }
+    }
+
+    fun setModelScale(id: String, scale: Float): Scene {
+        return updateModel(id) { model ->
+            model.copy(scale = scale.coerceAtLeast(MIN_SCALE))
+        }
+    }
+
     fun updateModel(model: SceneModel): Scene {
         val targetId = model.id
         return copy(models = models + (targetId to model))
+    }
+
+    companion object {
+        private const val MIN_SCALE = 0.0001f
     }
 }
 
@@ -31,7 +88,15 @@ data class SceneVector3(
     val x: Float = 0f,
     val y: Float = 0f,
     val z: Float = 0f
-)
+) {
+    fun offsetBy(deltaX: Float, deltaY: Float, deltaZ: Float): SceneVector3 {
+        return copy(
+            x = x + deltaX,
+            y = y + deltaY,
+            z = z + deltaZ
+        )
+    }
+}
 
 @Stable
 data class SceneModel(

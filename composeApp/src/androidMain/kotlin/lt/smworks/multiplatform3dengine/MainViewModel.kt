@@ -33,45 +33,15 @@ class MainViewModel : ViewModel() {
         val model = scene.getModel(MODEL_ID) ?: return
     }
 
-    fun translateModels(deltaX: Float, deltaY: Float, deltaZ: Float) {
-        val currentScene = scene
-        scene = currentScene.copy(
-            models = currentScene.models.mapValues { (_, model) ->
-                model.copy(
-                    translation = model.translation.offset(deltaX, deltaY, deltaZ)
-                )
-            }
-        )
+    fun translateModel(deltaX: Float, deltaY: Float, deltaZ: Float) {
+        scene = scene.translateModelBy(MODEL_ID, deltaX, deltaY, deltaZ)
     }
 
-    fun scaleModels(delta: Float) {
-        val currentScene = scene
-        scene = currentScene.copy(
-            models = currentScene.models.mapValues { (_, model) ->
-                val newScale = (model.scale + delta).coerceAtLeast(0.0001f)
-                model.copy(scale = newScale)
-            }
-        )
+    fun scaleModel(delta: Float) {
+        scene = scene.scaleModelBy(MODEL_ID, delta)
     }
 
-    fun rotateModels(deltaX: Float, deltaY: Float, deltaZ: Float) {
-        val currentScene = scene
-        scene = currentScene.copy(
-            models = currentScene.models.mapValues { (_, model) ->
-                model.copy(
-                    rotation = model.rotation.offset(deltaX, deltaY, deltaZ)
-                )
-            }
-        )
+    fun rotateModel(deltaX: Float, deltaY: Float, deltaZ: Float) {
+        scene = scene.rotateModelBy(MODEL_ID, deltaX, deltaY, deltaZ)
     }
 }
-
-private fun SceneVector3.offset(deltaX: Float, deltaY: Float, deltaZ: Float): SceneVector3 {
-    return SceneVector3(
-        x = x + deltaX,
-        y = y + deltaY,
-        z = z + deltaZ
-    )
-}
-
-

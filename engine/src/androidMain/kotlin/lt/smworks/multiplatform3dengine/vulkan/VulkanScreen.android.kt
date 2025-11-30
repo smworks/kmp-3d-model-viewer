@@ -185,7 +185,6 @@ fun rememberSceneRenderer(
     val trackedModels = remember(engine) { mutableMapOf<String, TrackedModel>() }
     val rotationJobs = remember(engine) { mutableMapOf<String, Job>() }
     val modelUpdateJobs = remember(engine) { mutableMapOf<String, ModelUpdateJob>() }
-    val updateScope = remember(engine) { SceneUpdateScope(handleMap) }
     val frameUpdates = remember(engine) {
         MutableSharedFlow<Unit>(
             extraBufferCapacity = 1,

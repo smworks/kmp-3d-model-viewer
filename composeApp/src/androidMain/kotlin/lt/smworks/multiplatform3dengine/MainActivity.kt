@@ -13,7 +13,6 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import lt.smworks.multiplatform3dengine.vulkan.Config
-import lt.smworks.multiplatform3dengine.vulkan.Scene
 import lt.smworks.multiplatform3dengine.vulkan.VulkanScreen
 
 class MainActivity : ComponentActivity() {
@@ -40,38 +39,21 @@ fun AndroidSample(
                 .background(Color.Black)
                 .systemBarsPadding()
         ) {
-            ModelPreview(
+            VulkanScreen(
+                modifier = Modifier.weight(1f).fillMaxWidth(),
                 scene = scene,
-                onUpdate = viewModel::onUpdate
+                onUpdate = viewModel::onUpdate,
+                config = Config(showFps = true)
             )
             ModelControls(
                 hasModels = scene.models.isNotEmpty(),
-                onTranslate = viewModel::translateModels,
-                onScale = viewModel::scaleModels,
-                onRotate = viewModel::rotateModels,
+                onTranslate = viewModel::translateModel,
+                onScale = viewModel::scaleModel,
+                onRotate = viewModel::rotateModel,
                 modifier = Modifier
-                    .fillMaxWidth()
+                    .weight(1f)
                     .padding(horizontal = 16.dp, vertical = 12.dp)
             )
         }
-    }
-}
-
-@Composable
-private fun ColumnScope.ModelPreview(
-    scene: Scene,
-    onUpdate: () -> Unit
-) {
-    Box(
-        modifier = Modifier
-            .weight(1f)
-            .fillMaxSize()
-    ) {
-        VulkanScreen(
-            modifier = Modifier.fillMaxSize(),
-            scene = scene,
-            onUpdate = onUpdate,
-            config = Config(showFps = true)
-        )
     }
 }
