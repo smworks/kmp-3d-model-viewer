@@ -13,6 +13,7 @@ expect class EngineAPI() {
     fun scaleBy(modelId: Long, delta: Float)
     fun getFps(): Int
     fun setOnFrameUpdate(callback: (() -> Unit)?)
+    fun setFrameRateLimit(fps: Float?)
 
     companion object {
         fun loadFile(path: String): ByteArray?

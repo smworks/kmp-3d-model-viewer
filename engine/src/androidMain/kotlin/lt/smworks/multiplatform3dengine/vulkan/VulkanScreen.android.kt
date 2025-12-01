@@ -1,8 +1,11 @@
 package lt.smworks.multiplatform3dengine.vulkan
 
+import android.content.Context
+import android.os.Build
 import android.util.Log
 import android.view.SurfaceHolder
 import android.view.SurfaceView
+import android.view.WindowManager
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
@@ -23,6 +26,8 @@ import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.isActive
 
 private const val LOG_TAG = "VulkanScreen"
+private const val DEFAULT_REFRESH_RATE = 60f
+private const val FPS_SAMPLE_PERIOD_MS = 250L
 
 @Composable
 actual fun VulkanScreen(
@@ -31,9 +36,9 @@ actual fun VulkanScreen(
     onUpdate: () -> Unit,
     config: Config
 ) {
-    val renderState = rememberSceneRenderer(scene, fpsSampler = config.fpsSamplePeriodMs)
-    val engine = renderState.engine
     val context = LocalContext.current
+    val renderState = rememberSceneRenderer(scene = scene, targetFps = config.targetFps)
+    val engine = renderState.engine
     val supported = remember(context) { VulkanSupport.isSupported(context) }
     DisposableEffect(engine) {
         engine.setOnFrameUpdate {
@@ -164,12 +169,13 @@ fun rememberEngineApi(): EngineAPI {
 @Composable
 fun rememberSceneRenderer(
     scene: Scene,
-    fpsSampler: Long = 1000L
+    targetFps: TargetFPS
 ): SceneRenderState {
+    val context = LocalContext.current
     val engine = rememberEngineApi()
     val memory = remember(engine) {
         RendererMemory(
-            fpsState = mutableStateOf(0),
+            fpsState = mutableIntStateOf(0),
             trackedModels = mutableMapOf(),
             frameUpdates = MutableSharedFlow(
                 extraBufferCapacity = 1,
@@ -245,14 +251,34 @@ fun rememberSceneRenderer(
         }
     }
 
-    LaunchedEffect(engine, fpsSampler) {
+    FramesPerSecond(engine, targetFps, context)
+
+    LaunchedEffect(engine) {
         while (isActive) {
             memory.fpsState.value = engine.getFps()
-            delay(fpsSampler)
+            delay(FPS_SAMPLE_PERIOD_MS)
         }
     }
 
     return renderState
+}
+
+@Composable
+private fun FramesPerSecond(
+    engine: EngineAPI,
+    targetFps: TargetFPS,
+    context: Context
+) {
+    val framesPerSecond = remember {
+        if (targetFps == TargetFPS.FPS_VSYNC) {
+            context.getDisplayRefreshRate()
+        } else {
+            targetFps.resolveTargetFps()
+        }
+    }
+    LaunchedEffect(engine, framesPerSecond) {
+        engine.setFrameRateLimit(framesPerSecond)
+    }
 }
 
 private data class TrackedModel(
@@ -265,3 +291,21 @@ private class RendererMemory(
     val trackedModels: MutableMap<String, TrackedModel>,
     val frameUpdates: MutableSharedFlow<Unit>
 )
+
+private fun Context.getDisplayRefreshRate(): Float {
+    val current = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+        display.refreshRate
+    } else {
+        @Suppress("DEPRECATION")
+        (getSystemService(Context.WINDOW_SERVICE) as? WindowManager)?.defaultDisplay?.refreshRate
+    }
+    return current?.takeIf { it > 0f } ?: DEFAULT_REFRESH_RATE
+}
+
+private fun TargetFPS.resolveTargetFps(): Float? = when (this) {
+    TargetFPS.FPS_24 -> 24f
+    TargetFPS.FPS_30 -> 30f
+    TargetFPS.FPS_60 -> 60f
+    TargetFPS.FPS_UNLIMITED -> null
+    TargetFPS.FPS_VSYNC -> null
+}

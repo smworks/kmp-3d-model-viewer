@@ -7,8 +7,16 @@ import androidx.compose.ui.Modifier
 @Stable
 data class Config(
     val showFps: Boolean = false,
-    val fpsSamplePeriodMs: Long = 250L
+    val targetFps: TargetFPS = TargetFPS.FPS_VSYNC
 )
+
+enum class TargetFPS {
+    FPS_24,
+    FPS_30,
+    FPS_60,
+    FPS_UNLIMITED,
+    FPS_VSYNC
+}
 
 @Composable
 expect fun VulkanScreen(

@@ -53,6 +53,14 @@ actual class EngineAPI actual constructor() {
 
     actual fun getFps(): Int = 0
 
+    actual fun setOnFrameUpdate(callback: (() -> Unit)?) {
+        // No-op on iOS until native renderer is implemented.
+    }
+
+    actual fun setFrameRateLimit(fps: Float?) {
+        // No-op on iOS until native renderer is implemented.
+    }
+
     actual companion object {
         fun loadFile(path: String): ByteArray? {
             val resourceRoot = NSBundle.mainBundle.resourcePath ?: return null

@@ -1,11 +1,14 @@
 package lt.smworks.multiplatform3dengine.vulkan
 
-import android.view.Surface
 import android.content.res.AssetManager
+import android.view.Surface
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
+import java.util.concurrent.locks.LockSupport
+import kotlin.math.roundToLong
 
 actual class EngineAPI actual constructor() {
+
     private val running = AtomicBoolean(false)
     private var thread: Thread? = null
     private var isNativeReady = false
@@ -21,6 +24,8 @@ actual class EngineAPI actual constructor() {
     private var hasPendingResize = false
     @Volatile
     private var frameUpdateCallback: (() -> Unit)? = null
+    @Volatile
+    private var targetFrameIntervalNanos: Long = NO_LIMIT_INTERVAL
 
     private data class ModelState(
         val id: Long,
@@ -58,9 +63,11 @@ actual class EngineAPI actual constructor() {
         if (running.getAndSet(true)) return
         thread = Thread {
             while (running.get()) {
+                val frameStart = System.nanoTime()
                 nativeRender()
                 frameUpdateCallback?.invoke()
                 recordFrame()
+                applyFramePacing(frameStart)
             }
         }.apply { start() }
     }
@@ -99,6 +106,15 @@ actual class EngineAPI actual constructor() {
     actual fun getFps(): Int = currentFps
     actual fun setOnFrameUpdate(callback: (() -> Unit)?) {
         frameUpdateCallback = callback
+    }
+
+    actual fun setFrameRateLimit(fps: Float?) {
+        if (fps == null || fps <= 0f) {
+            targetFrameIntervalNanos = NO_LIMIT_INTERVAL
+            return
+        }
+        val interval = (NANOS_IN_SECOND.toDouble() / fps).roundToLong()
+        targetFrameIntervalNanos = if (interval > 0L) interval else NO_LIMIT_INTERVAL
     }
 
     actual fun loadModel(modelName: String, x: Float, y: Float, z: Float, scale: Float): Long {
@@ -186,6 +202,7 @@ actual class EngineAPI actual constructor() {
         setSharedAssetManager(null)
         hasPendingResize = false
         frameUpdateCallback = null
+        targetFrameIntervalNanos = NO_LIMIT_INTERVAL
     }
 
     private fun recordFrame() {
@@ -235,6 +252,8 @@ actual class EngineAPI actual constructor() {
     private external fun nativeScaleModel(modelId: Long, scale: Float)
 
     actual companion object {
+        private const val NO_LIMIT_INTERVAL = -1L
+        private const val NANOS_IN_SECOND = 1_000_000_000L
         @Volatile
         private var sharedAssetManager: AssetManager? = null
 
@@ -265,6 +284,19 @@ actual class EngineAPI actual constructor() {
             nativeResize(width, height)
         }
         hasPendingResize = false
+    }
+
+    private fun applyFramePacing(frameStartNanos: Long) {
+        val interval = targetFrameIntervalNanos
+        if (interval == NO_LIMIT_INTERVAL) {
+            return
+        }
+        val elapsed = System.nanoTime() - frameStartNanos
+        val remaining = interval - elapsed
+        if (remaining <= 0L) {
+            return
+        }
+        LockSupport.parkNanos(remaining)
     }
 }
 
