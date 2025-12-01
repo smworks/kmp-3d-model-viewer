@@ -138,7 +138,7 @@ static GpuModel* findModelById(int64_t modelId) {
 
 JavaVM* g_javaVm = nullptr;
 jclass g_engineApiClass = nullptr;
-jmethodID g_decodeTextureMethod = nullptr;
+jmethodID g_loadFileMethod = nullptr;
 
 static void check(VkResult r, const char* what) {
 	if (r != VK_SUCCESS) {
@@ -487,7 +487,7 @@ static size_t ensureTextureForMaterial(const Material& material) {
 		std::vector<unsigned char> pixels;
 		int width = 0;
 		int height = 0;
-		if (LoadImageFromAssets(g.assetManager, material.diffuseTexture, 4, pixels, width, height)) {
+		if (LoadImageFromFile(material.diffuseTexture, 4, pixels, width, height)) {
 			const size_t size = static_cast<size_t>(width) * static_cast<size_t>(height) * 4;
 			if (size == pixels.size()) {
 				return createTextureFromPixels(key, static_cast<uint32_t>(width), static_cast<uint32_t>(height), pixels.data(), pixels.size());
@@ -929,10 +929,10 @@ Java_lt_smworks_multiplatform3dengine_vulkan_EngineAPI_nativeInit(JNIEnv* env, j
 			env->DeleteLocalRef(localClass);
 		}
 	}
-	if (g_engineApiClass && !g_decodeTextureMethod) {
-		g_decodeTextureMethod = env->GetStaticMethodID(g_engineApiClass, "decodeTexture", "(Ljava/lang/String;)[B");
-		if (!g_decodeTextureMethod) {
-			LOGE("Failed to locate EngineAPI.decodeTexture");
+	if (g_engineApiClass && !g_loadFileMethod) {
+		g_loadFileMethod = env->GetStaticMethodID(g_engineApiClass, "loadFile", "(Ljava/lang/String;)[B");
+		if (!g_loadFileMethod) {
+			LOGE("Failed to locate EngineAPI.loadFile");
 		}
 	}
 

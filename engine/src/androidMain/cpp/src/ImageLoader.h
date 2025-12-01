@@ -1,14 +1,12 @@
 #pragma once
 
-#include <android/asset_manager.h>
 #include <string>
 #include <vector>
 
-bool LoadImageFromAssets(AAssetManager* assetManager,
-	const std::string& assetPath,
-	int desiredChannels,
+bool LoadImageFromFile(const std::string& strPath,
+	int nDesiredChannels,
 	std::vector<unsigned char>& outPixels,
-	int& width,
-	int& height);
+	int& nWidth,
+	int& nHeight);
 
 

@@ -1,11 +1,7 @@
 package lt.smworks.multiplatform3dengine.vulkan
 
-import android.graphics.Bitmap
-import android.graphics.BitmapFactory
 import android.view.Surface
 import android.content.res.AssetManager
-import java.nio.ByteBuffer
-import java.nio.ByteOrder
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
 
@@ -238,7 +234,8 @@ actual class EngineAPI actual constructor() {
     private external fun nativeTranslateModel(modelId: Long, x: Float, y: Float, z: Float)
     private external fun nativeScaleModel(modelId: Long, scale: Float)
 
-    companion object {
+    actual companion object {
+        @Volatile
         private var sharedAssetManager: AssetManager? = null
 
         fun setSharedAssetManager(manager: AssetManager?) {
@@ -246,49 +243,15 @@ actual class EngineAPI actual constructor() {
         }
 
         @JvmStatic
-        fun decodeTexture(path: String): ByteArray? {
+        actual fun loadFile(path: String): ByteArray? {
             val manager = sharedAssetManager ?: return null
-            val opts = BitmapFactory.Options().apply {
-                inPreferredConfig = Bitmap.Config.ARGB_8888
-            }
-            val bitmap = try {
+            return try {
                 manager.open(path).use { stream ->
-                    BitmapFactory.decodeStream(stream, null, opts)
+                    stream.readBytes()
                 }
             } catch (e: Exception) {
                 null
-            } ?: return null
-
-            val width = bitmap.width
-            val height = bitmap.height
-            if (width <= 0 || height <= 0) {
-                bitmap.recycle()
-                return null
             }
-
-            val pixels = IntArray(width * height)
-            bitmap.getPixels(pixels, 0, width, 0, 0, width, height)
-            bitmap.recycle()
-
-            val totalBytes = width * height * 4
-            val output = ByteArray(8 + totalBytes)
-            val buffer = ByteBuffer.wrap(output).order(ByteOrder.LITTLE_ENDIAN)
-            buffer.putInt(width)
-            buffer.putInt(height)
-
-            var offset = 8
-            for (value in pixels) {
-                val a = (value ushr 24) and 0xFF
-                val r = (value ushr 16) and 0xFF
-                val g = (value ushr 8) and 0xFF
-                val b = value and 0xFF
-                output[offset++] = r.toByte()
-                output[offset++] = g.toByte()
-                output[offset++] = b.toByte()
-                output[offset++] = a.toByte()
-            }
-
-            return output
         }
     }
 
