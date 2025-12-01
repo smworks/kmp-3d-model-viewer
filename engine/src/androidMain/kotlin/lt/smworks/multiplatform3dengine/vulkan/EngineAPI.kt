@@ -183,11 +183,6 @@ actual class EngineAPI actual constructor() {
         scale(modelId, state.scale + delta)
     }
 
-    fun setupForGestures() {
-        // Store this renderer instance for gesture handling
-        setCurrentRendererForGestures(this)
-    }
-
     fun destroy() {
         stop()
         nativeDestroy()

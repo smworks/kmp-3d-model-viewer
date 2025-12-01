@@ -24,12 +24,6 @@ import kotlinx.coroutines.isActive
 
 private const val LOG_TAG = "VulkanScreen"
 
-private var currentRenderer: EngineAPI? = null
-
-internal fun setCurrentRendererForGestures(renderer: EngineAPI) {
-    currentRenderer = renderer
-}
-
 @Composable
 actual fun VulkanScreen(
     modifier: Modifier,
@@ -159,7 +153,6 @@ fun rememberEngineApi(): EngineAPI {
     val engine = remember { EngineAPI() }
 
     DisposableEffect(engine) {
-        engine.setupForGestures()
         onDispose {
             engine.destroy()
         }
