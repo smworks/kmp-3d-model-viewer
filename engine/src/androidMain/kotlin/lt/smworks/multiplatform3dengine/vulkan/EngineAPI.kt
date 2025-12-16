@@ -23,8 +23,6 @@ actual class EngineAPI actual constructor() {
     @Volatile
     private var hasPendingResize = false
     @Volatile
-    private var frameUpdateCallback: (() -> Unit)? = null
-    @Volatile
     private var targetFrameIntervalNanos: Long = NO_LIMIT_INTERVAL
 
     private data class ModelState(
@@ -65,7 +63,6 @@ actual class EngineAPI actual constructor() {
             while (running.get()) {
                 val frameStart = System.nanoTime()
                 nativeRender()
-                frameUpdateCallback?.invoke()
                 recordFrame()
                 applyFramePacing(frameStart)
             }
@@ -104,9 +101,6 @@ actual class EngineAPI actual constructor() {
     }
 
     actual fun getFps(): Int = currentFps
-    actual fun setOnFrameUpdate(callback: (() -> Unit)?) {
-        frameUpdateCallback = callback
-    }
 
     actual fun setFrameRateLimit(fps: Float?) {
         if (fps == null || fps <= 0f) {
@@ -201,7 +195,6 @@ actual class EngineAPI actual constructor() {
         isNativeReady = false
         setSharedAssetManager(null)
         hasPendingResize = false
-        frameUpdateCallback = null
         targetFrameIntervalNanos = NO_LIMIT_INTERVAL
     }
 

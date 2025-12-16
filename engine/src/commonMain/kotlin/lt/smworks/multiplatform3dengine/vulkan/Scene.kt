@@ -106,19 +106,6 @@ data class SceneModel(
     val scale: Float = 1f
 )
 
-@Stable
-class SceneRenderState internal constructor(
-    val engine: EngineAPI,
-    fpsState: MutableState<Int>,
-    internal val frameUpdates: MutableSharedFlow<Unit>
-) {
-    val fps: State<Int> = fpsState
-
-    internal fun notifyFrameRendered() {
-        frameUpdates.tryEmit(Unit)
-    }
-}
-
 class EngineModelHandle internal constructor(
     val id: Long,
     val assetPath: String,

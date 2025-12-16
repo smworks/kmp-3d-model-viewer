@@ -20,14 +20,12 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
-import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.isActive
 
-private const val LOG_TAG = "VulkanScreen"
+private const val TAG = "VulkanScreen"
 private const val DEFAULT_REFRESH_RATE = 60f
-private const val FPS_SAMPLE_PERIOD_MS = 250L
+private const val TARGET_FRAME_MS = 16L
 
 @Composable
 actual fun VulkanScreen(
@@ -37,95 +35,17 @@ actual fun VulkanScreen(
     config: Config
 ) {
     val context = LocalContext.current
-    val renderState = rememberSceneRenderer(scene = scene, targetFps = config.targetFps)
-    val engine = renderState.engine
+    val engine = rememberEngine(scene = scene, targetFps = config.targetFps)
     val supported = remember(context) { VulkanSupport.isSupported(context) }
-    DisposableEffect(engine) {
-        engine.setOnFrameUpdate {
-            renderState.notifyFrameRendered()
-        }
-        onDispose {
-            engine.setOnFrameUpdate(null)
-        }
-    }
 
-    LaunchedEffect(renderState.frameUpdates, onUpdate) {
-        renderState.frameUpdates.collect {
-            onUpdate()
-        }
-    }
+    UpdateLoop(onUpdate)
 
     if (supported) {
         Box(modifier = modifier) {
-            AndroidView(
-                modifier = Modifier.matchParentSize(),
-                factory = { viewContext ->
-                    SurfaceView(viewContext).apply {
-                        var lastSurfaceWidth = -1
-                        var lastSurfaceHeight = -1
-                        var lastLayoutWidth = -1
-                        var lastLayoutHeight = -1
-                        var lastOrientation: String? = null
-
-                        addOnLayoutChangeListener { _, left, top, right, bottom, _, _, _, _ ->
-                            val layoutWidth = right - left
-                            val layoutHeight = bottom - top
-                            if (layoutWidth <= 0 || layoutHeight <= 0) {
-                                return@addOnLayoutChangeListener
-                            }
-                            if (layoutWidth != lastLayoutWidth || layoutHeight != lastLayoutHeight) {
-                                lastLayoutWidth = layoutWidth
-                                lastLayoutHeight = layoutHeight
-                                Log.i(LOG_TAG, "Layout changed to ${layoutWidth}x$layoutHeight")
-                                engine.resize(layoutWidth, layoutHeight)
-                            }
-                        }
-
-                        holder.addCallback(object : SurfaceHolder.Callback {
-                            override fun surfaceCreated(holder: SurfaceHolder) {
-                                val surface = holder.surface
-                                if (surface != null && surface.isValid) {
-                                    engine.init(surface, viewContext.assets)
-                                    engine.start()
-                                }
-                            }
-
-                            override fun surfaceChanged(holder: SurfaceHolder, format: Int, width: Int, height: Int) {
-                                val orientation = when {
-                                    width > height -> "landscape"
-                                    height > width -> "portrait"
-                                    else -> "square"
-                                }
-
-                                if (orientation != lastOrientation) {
-                                    Log.i(LOG_TAG, "Orientation changed to $orientation (width=$width, height=$height)")
-                                    lastOrientation = orientation
-                                }
-
-                                if (width != lastSurfaceWidth || height != lastSurfaceHeight) {
-                                    engine.resize(width, height)
-                                    lastSurfaceWidth = width
-                                    lastSurfaceHeight = height
-                                    Log.i(LOG_TAG, "Surface resized to ${width}x$height")
-                                }
-                            }
-
-                            override fun surfaceDestroyed(holder: SurfaceHolder) {
-                                lastSurfaceWidth = -1
-                                lastSurfaceHeight = -1
-                                lastLayoutWidth = -1
-                                lastLayoutHeight = -1
-                                lastOrientation = null
-                                engine.destroy()
-                            }
-                        })
-                    }
-                }
-            )
+            RenderSurface(engine)
 
             if (config.showFps) {
-                val fps by renderState.fps
-                FpsCounter(fps)
+                FpsCounter(engine.getFps())
             }
         }
     } else {
@@ -133,6 +53,94 @@ actual fun VulkanScreen(
             text = "Vulkan is not supported",
             modifier = modifier
         )
+    }
+}
+
+@Composable
+private fun BoxScope.RenderSurface(engine: EngineAPI) {
+    AndroidView(
+        modifier = Modifier.matchParentSize(),
+        factory = { viewContext ->
+            SurfaceView(viewContext).apply {
+                var lastSurfaceWidth = -1
+                var lastSurfaceHeight = -1
+                var lastLayoutWidth = -1
+                var lastLayoutHeight = -1
+                var lastOrientation: String? = null
+
+                addOnLayoutChangeListener { _, left, top, right, bottom, _, _, _, _ ->
+                    val layoutWidth = right - left
+                    val layoutHeight = bottom - top
+                    if (layoutWidth <= 0 || layoutHeight <= 0) {
+                        return@addOnLayoutChangeListener
+                    }
+                    if (layoutWidth != lastLayoutWidth || layoutHeight != lastLayoutHeight) {
+                        lastLayoutWidth = layoutWidth
+                        lastLayoutHeight = layoutHeight
+                        Log.i(TAG, "Layout changed to ${layoutWidth}x$layoutHeight")
+                        engine.resize(layoutWidth, layoutHeight)
+                    }
+                }
+
+                holder.addCallback(object : SurfaceHolder.Callback {
+                    override fun surfaceCreated(holder: SurfaceHolder) {
+                        val surface = holder.surface
+                        if (surface != null && surface.isValid) {
+                            engine.init(surface, viewContext.assets)
+                            engine.start()
+                        }
+                    }
+
+                    override fun surfaceChanged(holder: SurfaceHolder, format: Int, width: Int, height: Int) {
+                        val orientation = when {
+                            width > height -> "landscape"
+                            height > width -> "portrait"
+                            else -> "square"
+                        }
+
+                        if (orientation != lastOrientation) {
+                            Log.i(TAG, "Orientation changed to $orientation (width=$width, height=$height)")
+                            lastOrientation = orientation
+                        }
+
+                        if (width != lastSurfaceWidth || height != lastSurfaceHeight) {
+                            engine.resize(width, height)
+                            lastSurfaceWidth = width
+                            lastSurfaceHeight = height
+                            Log.i(TAG, "Surface resized to ${width}x$height")
+                        }
+                    }
+
+                    override fun surfaceDestroyed(holder: SurfaceHolder) {
+                        lastSurfaceWidth = -1
+                        lastSurfaceHeight = -1
+                        lastLayoutWidth = -1
+                        lastLayoutHeight = -1
+                        lastOrientation = null
+                        engine.destroy()
+                    }
+                })
+            }
+        }
+    )
+}
+
+@Composable
+private fun UpdateLoop(onUpdate: () -> Unit) {
+    LaunchedEffect(Unit) {
+        var lastTime = System.nanoTime()
+        while (isActive) {
+            val currentTime = System.nanoTime()
+            val deltaTime = (currentTime - lastTime) / 1_000_000
+            lastTime = currentTime
+
+            onUpdate()
+
+            val sleepTime = TARGET_FRAME_MS - deltaTime
+            if (sleepTime > 0) {
+                delay(sleepTime)
+            }
+        }
     }
 }
 
@@ -167,30 +175,13 @@ fun rememberEngineApi(): EngineAPI {
 }
 
 @Composable
-fun rememberSceneRenderer(
+fun rememberEngine(
     scene: Scene,
     targetFps: TargetFPS
-): SceneRenderState {
+): EngineAPI {
     val context = LocalContext.current
     val engine = rememberEngineApi()
-    val memory = remember(engine) {
-        RendererMemory(
-            fpsState = mutableIntStateOf(0),
-            trackedModels = mutableMapOf(),
-            frameUpdates = MutableSharedFlow(
-                extraBufferCapacity = 1,
-                onBufferOverflow = BufferOverflow.DROP_OLDEST
-            )
-        )
-    }
-    val renderState = remember(engine) {
-        SceneRenderState(
-            engine = engine,
-            fpsState = memory.fpsState,
-            frameUpdates = memory.frameUpdates
-        )
-    }
-    val trackedModels = memory.trackedModels
+    val trackedModels = remember { mutableMapOf<String, TrackedModel>() }
 
     LaunchedEffect(engine, scene.camera.position) {
         val position = scene.camera.position
@@ -253,14 +244,7 @@ fun rememberSceneRenderer(
 
     FramesPerSecond(engine, targetFps, context)
 
-    LaunchedEffect(engine) {
-        while (isActive) {
-            memory.fpsState.value = engine.getFps()
-            delay(FPS_SAMPLE_PERIOD_MS)
-        }
-    }
-
-    return renderState
+    return engine
 }
 
 @Composable
@@ -284,12 +268,6 @@ private fun FramesPerSecond(
 private data class TrackedModel(
     val handle: EngineModelHandle,
     val model: SceneModel
-)
-
-private class RendererMemory(
-    val fpsState: MutableState<Int>,
-    val trackedModels: MutableMap<String, TrackedModel>,
-    val frameUpdates: MutableSharedFlow<Unit>
 )
 
 private fun Context.getDisplayRefreshRate(): Float {
