@@ -18,6 +18,7 @@
 #include <cstdint>
 #include <mutex>
 #include <thread>
+#include <memory>
 
 #include "ImageLoader.h"
 
@@ -25,6 +26,8 @@ static constexpr size_t INVALID_TEXTURE_INDEX = std::numeric_limits<size_t>::max
 #include "ModelLoader.h"
 #include "VulkanBuilder.h"
 #include "Camera.h"
+#include "engine/EngineCore.h"
+#include "engine/GraphicsLayer.h"
 
 #define LOG_TAG "VKRenderer"
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO, LOG_TAG, __VA_ARGS__)
@@ -94,6 +97,28 @@ struct VulkanState {
 
 static VulkanState g;
 static std::mutex g_stateMutex;
+static std::unique_ptr<engine::CEngineCore> g_pEngineCore;
+
+class VulkanGraphicsLayer : public engine::CGraphicsLayer {
+public:
+	bool bInitialize(const engine::SInitConfig& sConfig) override;
+	void InitializeResources() override;
+	void Resize(const engine::SFrameConfig& sFrame) override;
+	void RenderFrame(const engine::SCameraState& sCamera) override;
+	void Shutdown() override;
+
+	void LoadModel(const engine::SModelDescription& sModel) override;
+	void UpdateModelTransform(const engine::SModelDescription& sModel) override;
+	void RemoveModel(int64_t llModelId) override;
+	void TranslateModel(int64_t llModelId, float fX, float fY, float fZ) override;
+	void ScaleModel(int64_t llModelId, float fScale) override;
+	void RotateModel(int64_t llModelId, float fX, float fY, float fZ) override;
+
+	void MoveCamera(float fDelta) override;
+	void SetCameraPosition(const engine::SCameraState& sCamera) override;
+	void SetCameraRotation(const engine::SCameraState& sCamera) override;
+	void RotateCamera(float fYaw, float fPitch, float fRoll) override;
+};
 
 static const char* surfaceTransformName(VkSurfaceTransformFlagBitsKHR transform) {
 	switch (transform) {
@@ -936,20 +961,46 @@ Java_lt_smworks_multiplatform3dengine_vulkan_EngineAPI_nativeInit(JNIEnv* env, j
 		}
 	}
 
-	g.window = ANativeWindow_fromSurface(env, surface);
-	g.assetManager = AAssetManager_fromJava(env, assetManager);
-	uint32_t width = static_cast<uint32_t>(ANativeWindow_getWidth(g.window));
-	uint32_t height = static_cast<uint32_t>(ANativeWindow_getHeight(g.window));
+	ANativeWindow* pWindow = ANativeWindow_fromSurface(env, surface);
+	AAssetManager* pAssetManager = AAssetManager_fromJava(env, assetManager);
+	if (!pWindow || !pAssetManager) {
+		LOGE("nativeInit received invalid window or asset manager");
+		return;
+	}
 
-	// Use VulkanBuilder to set up Vulkan
+	if (!g_pEngineCore) {
+		g_pEngineCore = std::make_unique<engine::CEngineCore>(std::make_unique<VulkanGraphicsLayer>());
+	}
+	engine::SInitConfig sConfig;
+	sConfig.pNativeWindow = pWindow;
+	sConfig.pPlatformHandle = pAssetManager;
+	sConfig.uWidth = static_cast<uint32_t>(ANativeWindow_getWidth(pWindow));
+	sConfig.uHeight = static_cast<uint32_t>(ANativeWindow_getHeight(pWindow));
+
+	if (!g_pEngineCore->bInitialize(sConfig)) {
+		LOGE("Engine core initialization failed");
+	}
+}
+
+bool VulkanGraphicsLayer::bInitialize(const engine::SInitConfig& sConfig) {
+	g.window = static_cast<ANativeWindow*>(sConfig.pNativeWindow);
+	g.assetManager = static_cast<AAssetManager*>(sConfig.pPlatformHandle);
+	if (!g.window || !g.assetManager) {
+		LOGE("VulkanGraphicsLayer initialization failed: invalid native window or asset manager");
+		return false;
+	}
+
+	uint32_t uRequestedWidth = sConfig.uWidth != 0U ? sConfig.uWidth : static_cast<uint32_t>(ANativeWindow_getWidth(g.window));
+	uint32_t uRequestedHeight = sConfig.uHeight != 0U ? sConfig.uHeight : static_cast<uint32_t>(ANativeWindow_getHeight(g.window));
+
 	g.builder = new VulkanBuilder(g.window, g.assetManager);
 	g.builder->buildInstance()
 		.buildSurface()
 		.pickPhysicalDevice()
 		.buildDeviceAndQueue()
-		.buildSwapchain(width, height)
+		.buildSwapchain(uRequestedWidth, uRequestedHeight)
 		.buildImageViews();
-	// Copy core handles for local use
+
 	g.instance = g.builder->getInstance();
 	g.surface = g.builder->getSurface();
 	g.physicalDevice = g.builder->getPhysicalDevice();
@@ -963,9 +1014,8 @@ Java_lt_smworks_multiplatform3dengine_vulkan_EngineAPI_nativeInit(JNIEnv* env, j
 	g.swapchainImages = g.builder->getSwapchainImages();
 	g.swapchainImageViews = g.builder->getSwapchainImageViews();
 	g.camera.updateViewport(g.swapchainExtent);
-	// Build render pass and pipeline via builder
+
 	buildPipelineWithBuilder();
-	// proceed with buffers/command buffers
 	for (auto& model : g.models) {
 		uploadGpuBuffers(model);
 	}
@@ -975,146 +1025,32 @@ Java_lt_smworks_multiplatform3dengine_vulkan_EngineAPI_nativeInit(JNIEnv* env, j
 	recordCommandBuffers();
 	createSyncObjects();
 	g.initialized = true;
+
 	const VkExtent2D displayExtent = resolveDisplayExtent(g.swapchainExtent, g.surfaceTransform);
-	LOGI("Vulkan initialized w=%u h=%u swapchain=%ux%u display=%ux%u aspect=%.3f transform=%s (%u)",
-		width, height,
+	LOGI("VulkanGraphicsLayer initialized w=%u h=%u swapchain=%ux%u display=%ux%u aspect=%.3f transform=%s (%u)",
+		uRequestedWidth, uRequestedHeight,
 		g.swapchainExtent.width, g.swapchainExtent.height,
 		displayExtent.width, displayExtent.height,
 		(displayExtent.height > 0) ? static_cast<float>(displayExtent.width) / static_cast<float>(displayExtent.height) : 0.0f,
 		surfaceTransformName(g.surfaceTransform), g.surfaceTransform);
+	return true;
 }
 
-JNIEXPORT void JNICALL
-Java_lt_smworks_multiplatform3dengine_vulkan_EngineAPI_nativeResize(JNIEnv* env, jobject thiz, jint width, jint height) {
-	if (!g.initialized) return;
-	if (width <= 0 || height <= 0) return;
-	recreateSwapchain(static_cast<uint32_t>(width), static_cast<uint32_t>(height));
-	const VkExtent2D displayExtent = resolveDisplayExtent(g.swapchainExtent, g.surfaceTransform);
-	LOGI("Resize requested w=%d h=%d resulting swapchain=%ux%u display=%ux%u aspect=%.3f transform=%s (%u)",
-		width, height,
-		g.swapchainExtent.width, g.swapchainExtent.height,
-		displayExtent.width, displayExtent.height,
-		(displayExtent.height > 0) ? static_cast<float>(displayExtent.width) / static_cast<float>(displayExtent.height) : 0.0f,
-		surfaceTransformName(g.surfaceTransform), g.surfaceTransform);
+void VulkanGraphicsLayer::InitializeResources() {
+	// Resources are prepared during bInitialize for the Vulkan implementation.
 }
 
-JNIEXPORT void JNICALL
-Java_lt_smworks_multiplatform3dengine_vulkan_EngineAPI_nativeLoadModel(JNIEnv* env, jobject thiz, jlong modelId, jstring modelName, jfloat x, jfloat y, jfloat z, jfloat scale) {
-	const char* pcModelChars = modelName ? env->GetStringUTFChars(modelName, nullptr) : nullptr;
-	std::string strModelPath = pcModelChars ? std::string(pcModelChars) : std::string();
-	if (pcModelChars) {
-		env->ReleaseStringUTFChars(modelName, pcModelChars);
-	}
-
-	if (strModelPath.empty()) {
-		LOGE("nativeLoadModel called with empty model path");
-		return;
-	}
-
-	const float fAppliedScale = scale > 0.0f ? static_cast<float>(scale) : 1.0f;
-	const float fPosX = static_cast<float>(x);
-	const float fPosY = static_cast<float>(y);
-	const float fPosZ = static_cast<float>(z);
-	const int64_t llModelId = static_cast<int64_t>(modelId);
-
-	AAssetManager* pAssetManager = nullptr;
-	{
-		std::lock_guard<std::mutex> oGuard(g_stateMutex);
-		pAssetManager = g.assetManager;
-	}
-
-	if (!pAssetManager) {
-		LOGE("nativeLoadModel called before asset manager was ready");
-		return;
-	}
-
-	std::thread oLoader([strModelPath = std::move(strModelPath), fPosX, fPosY, fPosZ, fAppliedScale, llModelId, pAssetManager]() mutable {
-		Model oNewModel = loadModel(pAssetManager, strModelPath);
-		if (!oNewModel.hasGeometry()) {
-			LOGE("Model %s has no geometry and will be skipped", strModelPath.c_str());
-			return;
-		}
-
-		oNewModel.setPosition(fPosX, fPosY, fPosZ);
-		oNewModel.setScale(fAppliedScale);
-
-		GpuModel oGpuModel;
-		oGpuModel.id = llModelId;
-		oGpuModel.cpu = std::move(oNewModel);
-
-		std::lock_guard<std::mutex> oGuard(g_stateMutex);
-		if (!g.assetManager) {
-			LOGE("Skipping model %s load because engine was destroyed", strModelPath.c_str());
-			return;
-		}
-		if (g.initialized) {
-			vkDeviceWaitIdle(g.device);
-			uploadGpuBuffers(oGpuModel);
-		}
-		g.models.push_back(std::move(oGpuModel));
-	});
-	oLoader.detach();
-}
-
-JNIEXPORT void JNICALL
-Java_lt_smworks_multiplatform3dengine_vulkan_EngineAPI_nativeMoveCamera(JNIEnv* env, jobject thiz, jfloat delta) {
-	if (!g.initialized) return;
-	g.camera.move(static_cast<float>(delta));
-}
-
-JNIEXPORT void JNICALL
-Java_lt_smworks_multiplatform3dengine_vulkan_EngineAPI_nativeSetCameraPosition(JNIEnv* env, jobject thiz, jfloat x, jfloat y, jfloat z) {
-	if (!g.initialized) return;
-	g.camera.setPosition(static_cast<float>(x), static_cast<float>(y), static_cast<float>(z));
-}
-
-JNIEXPORT void JNICALL
-Java_lt_smworks_multiplatform3dengine_vulkan_EngineAPI_nativeRotateModel(JNIEnv* env, jobject thiz, jlong modelId, jfloat rotationX, jfloat rotationY, jfloat rotationZ) {
+void VulkanGraphicsLayer::Resize(const engine::SFrameConfig& sFrame) {
 	if (!g.initialized) {
 		return;
 	}
-	std::lock_guard<std::mutex> guard(g_stateMutex);
-	GpuModel* gpuModel = findModelById(static_cast<int64_t>(modelId));
-	if (!gpuModel) {
+	if (sFrame.uWidth == 0U || sFrame.uHeight == 0U) {
 		return;
 	}
-	gpuModel->cpu.setRotation(static_cast<float>(rotationX), static_cast<float>(rotationY), static_cast<float>(rotationZ));
+	recreateSwapchain(sFrame.uWidth, sFrame.uHeight);
 }
 
-JNIEXPORT void JNICALL
-Java_lt_smworks_multiplatform3dengine_vulkan_EngineAPI_nativeTranslateModel(JNIEnv* env, jobject thiz, jlong modelId, jfloat x, jfloat y, jfloat z) {
-	if (!g.initialized) {
-		return;
-	}
-	std::lock_guard<std::mutex> oGuard(g_stateMutex);
-	const int64_t llModelId = static_cast<int64_t>(modelId);
-	GpuModel* pGpuModel = findModelById(llModelId);
-	if (!pGpuModel) {
-		return;
-	}
-	const float fX = static_cast<float>(x);
-	const float fY = static_cast<float>(y);
-	const float fZ = static_cast<float>(z);
-	pGpuModel->cpu.setPosition(fX, fY, fZ);
-}
-
-JNIEXPORT void JNICALL
-Java_lt_smworks_multiplatform3dengine_vulkan_EngineAPI_nativeScaleModel(JNIEnv* env, jobject thiz, jlong modelId, jfloat scale) {
-	if (!g.initialized) {
-		return;
-	}
-	std::lock_guard<std::mutex> oGuard(g_stateMutex);
-	const int64_t llModelId = static_cast<int64_t>(modelId);
-	GpuModel* pGpuModel = findModelById(llModelId);
-	if (!pGpuModel) {
-		return;
-	}
-	const float fScale = static_cast<float>(scale);
-	pGpuModel->cpu.setScale(fScale);
-}
-
-JNIEXPORT void JNICALL
-Java_lt_smworks_multiplatform3dengine_vulkan_EngineAPI_nativeRender(JNIEnv* env, jobject thiz) {
+void VulkanGraphicsLayer::RenderFrame(const engine::SCameraState&) {
 	if (!g.initialized) return;
 	std::unique_lock<std::mutex> stateLock(g_stateMutex);
 	size_t i = g.currentFrame % g.commandBuffers.size();
@@ -1128,7 +1064,6 @@ Java_lt_smworks_multiplatform3dengine_vulkan_EngineAPI_nativeRender(JNIEnv* env,
 	}
 	check(acq, "vkAcquireNextImageKHR");
 
-	// Reset and record command buffer with current camera rotation
 	check(vkResetCommandBuffer(g.commandBuffers[imageIndex], 0), "vkResetCommandBuffer");
 	VkCommandBufferBeginInfo bi{};
 	bi.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
@@ -1146,8 +1081,7 @@ Java_lt_smworks_multiplatform3dengine_vulkan_EngineAPI_nativeRender(JNIEnv* env,
 	rpbi.clearValueCount = 2;
 	rpbi.pClearValues = clears;
 	vkCmdBeginRenderPass(g.commandBuffers[imageIndex], &rpbi, VK_SUBPASS_CONTENTS_INLINE);
-	
-	// Apply camera viewport/scissor
+
 	g.camera.applyToCommandBuffer(g.commandBuffers[imageIndex]);
 	vkCmdBindPipeline(g.commandBuffers[imageIndex], VK_PIPELINE_BIND_POINT_GRAPHICS, g.graphicsPipeline);
 	const VkExtent2D displayExtent = resolveDisplayExtent(g.swapchainExtent, g.surfaceTransform);
@@ -1253,15 +1187,14 @@ Java_lt_smworks_multiplatform3dengine_vulkan_EngineAPI_nativeRender(JNIEnv* env,
 	g.currentFrame++;
 }
 
-JNIEXPORT void JNICALL
-Java_lt_smworks_multiplatform3dengine_vulkan_EngineAPI_nativeDestroy(JNIEnv* env, jobject thiz) {
+void VulkanGraphicsLayer::Shutdown() {
 	if (!g.initialized) return;
 	std::lock_guard<std::mutex> guard(g_stateMutex);
 	vkDeviceWaitIdle(g.device);
-	for (size_t i = 0; i < g.imageAvailable.size(); ++i) {
-		if (g.imageAvailable[i]) vkDestroySemaphore(g.device, g.imageAvailable[i], nullptr);
-		if (g.renderFinished[i]) vkDestroySemaphore(g.device, g.renderFinished[i], nullptr);
-		if (g.inFlightFences[i]) vkDestroyFence(g.device, g.inFlightFences[i], nullptr);
+	for (size_t iSem = 0; iSem < g.imageAvailable.size(); ++iSem) {
+		if (g.imageAvailable[iSem]) vkDestroySemaphore(g.device, g.imageAvailable[iSem], nullptr);
+		if (g.renderFinished[iSem]) vkDestroySemaphore(g.device, g.renderFinished[iSem], nullptr);
+		if (g.inFlightFences[iSem]) vkDestroyFence(g.device, g.inFlightFences[iSem], nullptr);
 	}
 	g.imageAvailable.clear();
 	g.renderFinished.clear();
@@ -1278,18 +1211,253 @@ Java_lt_smworks_multiplatform3dengine_vulkan_EngineAPI_nativeDestroy(JNIEnv* env
 	LOGI("Vulkan destroyed");
 }
 
+void VulkanGraphicsLayer::LoadModel(const engine::SModelDescription& sModel) {
+	const std::string strModelPath = sModel.sAssetPath;
+	if (strModelPath.empty()) {
+		LOGE("LoadModel called with empty asset path");
+		return;
+	}
+	const float fPosX = sModel.sTransform.fPosition[0];
+	const float fPosY = sModel.sTransform.fPosition[1];
+	const float fPosZ = sModel.sTransform.fPosition[2];
+	const float fScale = sModel.sTransform.fScale > 0.0f ? sModel.sTransform.fScale : 1.0f;
+	const int64_t llModelId = sModel.llId;
+
+	AAssetManager* pAssetManager = nullptr;
+	{
+		std::lock_guard<std::mutex> oGuard(g_stateMutex);
+		pAssetManager = g.assetManager;
+	}
+
+	if (!pAssetManager) {
+		LOGE("LoadModel called before asset manager was ready");
+		return;
+	}
+
+	std::thread oLoader([strModelPath, fPosX, fPosY, fPosZ, fScale, llModelId, pAssetManager]() mutable {
+		Model oNewModel = loadModel(pAssetManager, strModelPath);
+		if (!oNewModel.hasGeometry()) {
+			LOGE("Model %s has no geometry and will be skipped", strModelPath.c_str());
+			return;
+		}
+
+		oNewModel.setPosition(fPosX, fPosY, fPosZ);
+		oNewModel.setScale(fScale);
+
+		GpuModel oGpuModel;
+		oGpuModel.id = llModelId;
+		oGpuModel.cpu = std::move(oNewModel);
+
+		std::lock_guard<std::mutex> oGuard(g_stateMutex);
+		if (!g.assetManager) {
+			LOGE("Skipping model %s load because engine was destroyed", strModelPath.c_str());
+			return;
+		}
+		if (g.initialized) {
+			vkDeviceWaitIdle(g.device);
+			uploadGpuBuffers(oGpuModel);
+		}
+		g.models.push_back(std::move(oGpuModel));
+	});
+	oLoader.detach();
+}
+
+void VulkanGraphicsLayer::UpdateModelTransform(const engine::SModelDescription& sModel) {
+	std::lock_guard<std::mutex> oGuard(g_stateMutex);
+	GpuModel* pGpuModel = findModelById(sModel.llId);
+	if (!pGpuModel) {
+		return;
+	}
+	pGpuModel->cpu.setPosition(
+		sModel.sTransform.fPosition[0],
+		sModel.sTransform.fPosition[1],
+		sModel.sTransform.fPosition[2]);
+	pGpuModel->cpu.setScale(sModel.sTransform.fScale);
+	pGpuModel->cpu.setRotation(
+		sModel.sTransform.fRotation[0],
+		sModel.sTransform.fRotation[1],
+		sModel.sTransform.fRotation[2]);
+}
+
+void VulkanGraphicsLayer::RemoveModel(int64_t llModelId) {
+	std::lock_guard<std::mutex> oGuard(g_stateMutex);
+	const auto it = std::find_if(g.models.begin(), g.models.end(), [llModelId](const GpuModel& model) {
+		return model.id == llModelId;
+	});
+	if (it == g.models.end()) {
+		return;
+	}
+	destroyGpuBuffers(*it);
+	g.models.erase(it);
+}
+
+void VulkanGraphicsLayer::TranslateModel(int64_t llModelId, float fX, float fY, float fZ) {
+	if (!g.initialized) {
+		return;
+	}
+	std::lock_guard<std::mutex> oGuard(g_stateMutex);
+	GpuModel* pGpuModel = findModelById(llModelId);
+	if (!pGpuModel) {
+		return;
+	}
+	pGpuModel->cpu.setPosition(fX, fY, fZ);
+}
+
+void VulkanGraphicsLayer::ScaleModel(int64_t llModelId, float fScale) {
+	if (!g.initialized) {
+		return;
+	}
+	std::lock_guard<std::mutex> oGuard(g_stateMutex);
+	GpuModel* pGpuModel = findModelById(llModelId);
+	if (!pGpuModel) {
+		return;
+	}
+	pGpuModel->cpu.setScale(fScale);
+}
+
+void VulkanGraphicsLayer::RotateModel(int64_t llModelId, float fX, float fY, float fZ) {
+	if (!g.initialized) {
+		return;
+	}
+	std::lock_guard<std::mutex> guard(g_stateMutex);
+	GpuModel* pGpuModel = findModelById(llModelId);
+	if (!pGpuModel) {
+		return;
+	}
+	pGpuModel->cpu.setRotation(fX, fY, fZ);
+}
+
+void VulkanGraphicsLayer::MoveCamera(float fDelta) {
+	if (!g.initialized) return;
+	g.camera.move(fDelta);
+}
+
+void VulkanGraphicsLayer::SetCameraPosition(const engine::SCameraState& sCamera) {
+	if (!g.initialized) return;
+	g.camera.setPosition(
+		sCamera.fPosition[0],
+		sCamera.fPosition[1],
+		sCamera.fPosition[2]);
+}
+
+void VulkanGraphicsLayer::SetCameraRotation(const engine::SCameraState& sCamera) {
+	if (!g.initialized) return;
+	g.camera.setRotation(
+		sCamera.fRotation[0],
+		sCamera.fRotation[1],
+		sCamera.fRotation[2]);
+}
+
+void VulkanGraphicsLayer::RotateCamera(float fYaw, float fPitch, float fRoll) {
+	if (!g.initialized) return;
+	if (fYaw != 0.0f) g.camera.rotateYaw(fYaw);
+	if (fPitch != 0.0f) g.camera.rotatePitch(fPitch);
+	if (fRoll != 0.0f) g.camera.rotateRoll(fRoll);
+}
+
+
+
+JNIEXPORT void JNICALL
+Java_lt_smworks_multiplatform3dengine_vulkan_EngineAPI_nativeResize(JNIEnv* env, jobject thiz, jint width, jint height) {
+	if (!g_pEngineCore) return;
+	if (width <= 0 || height <= 0) return;
+	engine::SFrameConfig sFrame;
+	sFrame.uWidth = static_cast<uint32_t>(width);
+	sFrame.uHeight = static_cast<uint32_t>(height);
+	g_pEngineCore->Resize(sFrame);
+}
+
+JNIEXPORT void JNICALL
+Java_lt_smworks_multiplatform3dengine_vulkan_EngineAPI_nativeLoadModel(JNIEnv* env, jobject thiz, jlong modelId, jstring modelName, jfloat x, jfloat y, jfloat z, jfloat scale) {
+	const char* pcModelChars = modelName ? env->GetStringUTFChars(modelName, nullptr) : nullptr;
+	std::string strModelPath = pcModelChars ? std::string(pcModelChars) : std::string();
+	if (pcModelChars) {
+		env->ReleaseStringUTFChars(modelName, pcModelChars);
+	}
+
+	if (strModelPath.empty()) {
+		LOGE("nativeLoadModel called with empty model path");
+		return;
+	}
+
+	if (!g_pEngineCore) {
+		return;
+	}
+	engine::SModelDescription sDesc;
+	sDesc.llId = static_cast<int64_t>(modelId);
+	sDesc.sAssetPath = std::move(strModelPath);
+	sDesc.sTransform.fPosition[0] = static_cast<float>(x);
+	sDesc.sTransform.fPosition[1] = static_cast<float>(y);
+	sDesc.sTransform.fPosition[2] = static_cast<float>(z);
+	sDesc.sTransform.fScale = scale > 0.0f ? static_cast<float>(scale) : 1.0f;
+	g_pEngineCore->LoadModel(sDesc);
+}
+
+JNIEXPORT void JNICALL
+Java_lt_smworks_multiplatform3dengine_vulkan_EngineAPI_nativeMoveCamera(JNIEnv* env, jobject thiz, jfloat delta) {
+	if (!g_pEngineCore) return;
+	g_pEngineCore->MoveCamera(static_cast<float>(delta));
+}
+
+JNIEXPORT void JNICALL
+Java_lt_smworks_multiplatform3dengine_vulkan_EngineAPI_nativeSetCameraPosition(JNIEnv* env, jobject thiz, jfloat x, jfloat y, jfloat z) {
+	if (!g_pEngineCore) return;
+	g_pEngineCore->SetCameraPosition(static_cast<float>(x), static_cast<float>(y), static_cast<float>(z));
+}
+
+JNIEXPORT void JNICALL
+Java_lt_smworks_multiplatform3dengine_vulkan_EngineAPI_nativeRotateModel(JNIEnv* env, jobject thiz, jlong modelId, jfloat rotationX, jfloat rotationY, jfloat rotationZ) {
+	if (!g_pEngineCore) {
+		return;
+	}
+	g_pEngineCore->RotateModel(static_cast<int64_t>(modelId),
+		static_cast<float>(rotationX),
+		static_cast<float>(rotationY),
+		static_cast<float>(rotationZ));
+}
+
+JNIEXPORT void JNICALL
+Java_lt_smworks_multiplatform3dengine_vulkan_EngineAPI_nativeTranslateModel(JNIEnv* env, jobject thiz, jlong modelId, jfloat x, jfloat y, jfloat z) {
+	if (!g_pEngineCore) {
+		return;
+	}
+	g_pEngineCore->TranslateModel(static_cast<int64_t>(modelId),
+		static_cast<float>(x),
+		static_cast<float>(y),
+		static_cast<float>(z));
+}
+
+JNIEXPORT void JNICALL
+Java_lt_smworks_multiplatform3dengine_vulkan_EngineAPI_nativeScaleModel(JNIEnv* env, jobject thiz, jlong modelId, jfloat scale) {
+	if (!g_pEngineCore) {
+		return;
+	}
+	g_pEngineCore->ScaleModel(static_cast<int64_t>(modelId), static_cast<float>(scale));
+}
+
+JNIEXPORT void JNICALL
+Java_lt_smworks_multiplatform3dengine_vulkan_EngineAPI_nativeRender(JNIEnv* env, jobject thiz) {
+	if (!g_pEngineCore) return;
+	g_pEngineCore->Render();
+}
+
+JNIEXPORT void JNICALL
+Java_lt_smworks_multiplatform3dengine_vulkan_EngineAPI_nativeDestroy(JNIEnv* env, jobject thiz) {
+	if (!g_pEngineCore) return;
+	g_pEngineCore->Shutdown();
+	g_pEngineCore.reset();
+}
+
 JNIEXPORT void JNICALL
 Java_lt_smworks_multiplatform3dengine_vulkan_EngineAPI_nativeRotateCamera(JNIEnv* env, jobject thiz, jfloat yaw, jfloat pitch, jfloat roll) {
-	if (!g.initialized) return;
-	if (yaw != 0.0f) g.camera.rotateYaw(static_cast<float>(yaw));
-	if (pitch != 0.0f) g.camera.rotatePitch(static_cast<float>(pitch));
-	if (roll != 0.0f) g.camera.rotateRoll(static_cast<float>(roll));
+	if (!g_pEngineCore) return;
+	g_pEngineCore->RotateCamera(static_cast<float>(yaw), static_cast<float>(pitch), static_cast<float>(roll));
 }
 
 JNIEXPORT void JNICALL
 Java_lt_smworks_multiplatform3dengine_vulkan_EngineAPI_nativeSetCameraRotation(JNIEnv* env, jobject thiz, jfloat yaw, jfloat pitch, jfloat roll) {
-	if (!g.initialized) return;
-	g.camera.setRotation(static_cast<float>(yaw), static_cast<float>(pitch), static_cast<float>(roll));
+	if (!g_pEngineCore) return;
+	g_pEngineCore->SetCameraRotation(static_cast<float>(yaw), static_cast<float>(pitch), static_cast<float>(roll));
 }
 
 

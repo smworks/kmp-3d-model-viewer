@@ -8,10 +8,18 @@ plugins {
 kotlin {
 	androidTarget()
 
-    listOf(
+    val iosTargets = listOf(
         iosArm64(),
         iosSimulatorArm64()
     )
+
+    iosTargets.forEach { target ->
+        target.compilations.getByName("main") {
+            cinterops.create("engine") {
+                defFile("src/nativeInterop/cinterop/engine.def")
+            }
+        }
+    }
 
 	sourceSets {
 		commonMain.dependencies {

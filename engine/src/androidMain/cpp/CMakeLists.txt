@@ -47,13 +47,14 @@ add_library(vkrenderer SHARED
 	src/vkrenderer.h
 	src/VulkanBuilder.cpp
 	src/VulkanBuilder.h
-	src/Camera.cpp
-	src/Camera.h
-	src/Model.h
 	src/ModelLoader.cpp
 	src/ModelLoader.h
 	src/ImageLoader.cpp
 	src/ImageLoader.h
+	../../nativeMain/cpp/Camera.cpp
+	../../nativeMain/cpp/Camera.h
+	../../nativeMain/cpp/Model.h
+	../../nativeMain/cpp/engine/EngineCore.cpp
 )
 
 find_library(log-lib log)
@@ -62,6 +63,7 @@ find_library(vulkan-lib vulkan)
 
 target_include_directories(vkrenderer PRIVATE
 	${CMAKE_CURRENT_SOURCE_DIR}/src
+	${CMAKE_CURRENT_SOURCE_DIR}/../../nativeMain/cpp
 )
 
 target_compile_definitions(vkrenderer PRIVATE VK_USE_PLATFORM_ANDROID_KHR)

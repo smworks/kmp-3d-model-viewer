@@ -1,0 +1,4 @@
+headers = EngineIosBridge.h
+language = C
+compilerOpts = -I${projectDir}/src/nativeMain/cpp/engine
+
