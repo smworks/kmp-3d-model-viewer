@@ -46,7 +46,7 @@ actual class EngineAPI actual constructor() {
     private var cameraRoll = 0f
 
     init {
-        System.loadLibrary("vkrenderer")
+        System.loadLibrary("engine")
     }
 
     fun init(surface: Surface, assetManager: AssetManager) {

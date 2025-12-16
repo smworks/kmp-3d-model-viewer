@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.22.1)
-project(vkrenderer)
+project(engine)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -42,9 +42,11 @@ endforeach()
 
 add_custom_target(compile_shaders ALL DEPENDS ${SPV_OUTPUTS})
 
-add_library(vkrenderer SHARED
-	src/vkrenderer.cpp
-	src/vkrenderer.h
+add_library(engine SHARED
+	src/engine.cpp
+	src/engine.h
+	src/GraphicsEngine.cpp
+	src/GraphicsEngine.h
 	src/VulkanBuilder.cpp
 	src/VulkanBuilder.h
 	src/ModelLoader.cpp
@@ -61,19 +63,19 @@ find_library(log-lib log)
 find_library(android-lib android)
 find_library(vulkan-lib vulkan)
 
-target_include_directories(vkrenderer PRIVATE
+target_include_directories(engine PRIVATE
 	${CMAKE_CURRENT_SOURCE_DIR}/src
 	${CMAKE_CURRENT_SOURCE_DIR}/../../nativeMain/cpp
 )
 
-target_compile_definitions(vkrenderer PRIVATE VK_USE_PLATFORM_ANDROID_KHR)
+target_compile_definitions(engine PRIVATE VK_USE_PLATFORM_ANDROID_KHR)
 
-target_link_libraries(vkrenderer
+target_link_libraries(engine
 	${log-lib}
 	${android-lib}
 	${vulkan-lib}
 )
 
-add_dependencies(vkrenderer compile_shaders)
+add_dependencies(engine compile_shaders)
 
 
