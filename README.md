@@ -1,11 +1,8 @@
-This is a Kotlin Multiplatform project targeting Android and iOS.
+This repository contains a multiplatform rendering engine and a native Android demo application.
 
 * [`/engine`](./engine/src) is the multiplatform rendering engine. This module is the one you package and ship as a library.
 
-* [`/composeApp`](./composeApp/src) is a demo client that exercises the engine with a Compose Multiplatform UI. It contains several subfolders:
-    - [`commonMain`](./composeApp/src/commonMain/kotlin) holds the shared Kotlin code used by the demo.
-    - [`androidMain`](./composeApp/src/androidMain/kotlin) contains Android-specific demo implementations.
-    - [`iosMain`](./composeApp/src/iosMain/kotlin) contains iOS-specific demo implementations (for example, CoreCrypto calls).
+* [`/app`](./app/src) is a native Android demo client that exercises the engine with a Jetpack Compose UI. Its sources live under the standard `src/main` Android source set.
 
 * [`/iosApp`](./iosApp/iosApp) is a demo iOS application that integrates the engine. Open it in Xcode to run the demo or add SwiftUI experiments.
 
@@ -16,11 +13,11 @@ in your IDE’s toolbar or build it directly from the terminal:
 
 - on macOS/Linux
   ```shell
-  ./gradlew :composeApp:assembleDebug
+  ./gradlew :app:assembleDebug
   ```
 - on Windows
   ```shell
-  .\gradlew.bat :composeApp:assembleDebug
+  .\gradlew.bat :app:assembleDebug
   ```
 
 ### Build and Run iOS Application
